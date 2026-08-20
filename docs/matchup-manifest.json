@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-21",
+  "referencePlatform": "ios",
+  "referenceRoot": "a local checkout of the sibling iOS source repository",
+  "status": "Android source/runtime catalog verified; full paired visual parity unverified because iOS fixtures are absent",
+  "verification": {
+    "iosUnitTests": "28 passed",
+    "androidGradle": "testDebugUnitTest and assembleDebug passed",
+    "androidCatalog": {
+      "count": 27,
+      "root": "docs/screenshots/android",
+      "pixelDimensions": "1080x2424",
+      "device": "task AVD emulator-5580"
+    },
+    "iosBaseline": {
+      "root": "docs/screenshots/ios",
+      "pixelDimensions": "1206x2622",
+      "device": "dedicated iPhone 17 simulator"
+    },
+    "hashes": "docs/screenshots/SHA256SUMS"
+  },
+  "defaultProfile": {
+    "locale": "ko-KR",
+    "theme": "light",
+    "orientation": "portrait",
+    "textScale": 1.0,
+    "fixture": "family=우리 가족; sender=엄마; member=첫째"
+  },
+  "requiredCaptureMetadata": [
+    "revision", "dirtyState", "fixtureHash", "platform", "device", "osVersion",
+    "pixelDimensions", "density", "appBounds", "insets", "orientation", "theme",
+    "locale", "timezone", "fontScale", "sha256", "osOwnedMasks"
+  ],
+  "states": [
+    {"id":"setup_welcome","source":"Views/Setup/SetupWelcomeView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"create_default_invalid","source":"Views/Setup/CreateSpaceView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"create_filled_valid","source":"Views/Setup/CreateSpaceView.swift","class":"Functional","status":"source-only"},
+    {"id":"join_camera","source":"Views/Setup/JoinSpaceView.swift; Views/Setup/QRScannerView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"join_camera_denied","source":"Views/Setup/QRScannerView.swift","class":"Functional/OS-candidate","status":"source-only"},
+    {"id":"join_no_camera","source":"Views/Setup/JoinSpaceView.swift","class":"Content/state","status":"source-only"},
+    {"id":"join_manual_empty","source":"Views/Setup/JoinSpaceView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"join_manual_invalid","source":"Views/Setup/JoinSpaceView.swift; Models/QRInvite.swift","class":"Content/state","status":"source-only"},
+    {"id":"join_invite_confirmed_empty","source":"Views/Setup/JoinSpaceView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"join_invite_confirmed_named","source":"Views/Setup/JoinSpaceView.swift","class":"Functional","status":"source-only"},
+    {"id":"role_compact","source":"Views/Setup/RoleSelectionView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"role_regular","source":"Views/Setup/RoleSelectionView.swift","class":"Visual","status":"source-only"},
+    {"id":"parent_idle","source":"Views/Parent/ParentHomeView.swift","class":"Visual/Content/state","status":"source-only"},
+    {"id":"parent_connected","source":"Views/Parent/ParentHomeView.swift","class":"Content/state","status":"source-only"},
+    {"id":"parent_demo","source":"Views/Parent/ParentHomeView.swift","class":"Content/state","status":"source-only"},
+    {"id":"parent_ack","source":"Views/Parent/ParentHomeView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"parent_quiet_tap","source":"Views/Parent/ParentHomeView.swift; ViewModels/AppModel.swift","class":"Functional","status":"source-only"},
+    {"id":"parent_quiet_hold","source":"Views/Parent/ParentHomeView.swift; Services/DingDongPlayer.swift","class":"Functional","status":"source-only"},
+    {"id":"parent_ding_tap","source":"Views/Parent/ParentHomeView.swift; Services/DingDongPlayer.swift","class":"Functional","status":"source-only"},
+    {"id":"invite_qr","source":"Views/Parent/InviteQRView.swift","class":"Visual/Functional/OS-candidate","status":"source-only"},
+    {"id":"child_idle","source":"Views/Child/ChildHomeView.swift","class":"Visual/Content/state","status":"source-only"},
+    {"id":"child_connected","source":"Views/Child/ChildHomeView.swift","class":"Content/state/Functional","status":"source-only"},
+    {"id":"child_demo","source":"Views/Child/ChildHomeView.swift","class":"Content/state","status":"source-only"},
+    {"id":"incoming_quiet","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"incoming_ding","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"incoming_voice","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"voice_idle","source":"Views/Parent/VoiceMessageView.swift","class":"Visual/Content/state","status":"source-only"},
+    {"id":"voice_permission_requesting","source":"Views/Parent/VoiceMessageView.swift; Services/VoiceRecorder.swift","class":"Content/state/OS-candidate","status":"source-only"},
+    {"id":"voice_permission_denied","source":"Views/Parent/VoiceMessageView.swift","class":"Content/state/OS-candidate","status":"source-only"},
+    {"id":"voice_recording","source":"Views/Parent/VoiceMessageView.swift; Services/VoiceRecorder.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"voice_auto_stop","source":"Services/VoiceRecorder.swift","class":"Functional","status":"source-only"},
+    {"id":"voice_sent","source":"Views/Parent/VoiceMessageView.swift","class":"Content/state","status":"source-only"},
+    {"id":"settings_notification_needed","source":"Views/SettingsView.swift","class":"Content/state/OS-candidate","status":"source-only"},
+    {"id":"settings_notification_denied","source":"Views/SettingsView.swift","class":"Content/state/OS-candidate","status":"source-only"},
+    {"id":"settings_notification_allowed","source":"Views/SettingsView.swift","class":"Content/state","status":"source-only"},
+    {"id":"settings_demo_on","source":"Views/SettingsView.swift; ViewModels/AppModel.swift","class":"Functional","status":"source-only"},
+    {"id":"settings_push_not_requested","source":"Views/SettingsView.swift; Services/PushRegistrationService.swift","class":"Content/state/Functional","status":"remaining"},
+    {"id":"settings_push_waiting","source":"Views/SettingsView.swift; Services/PushRegistrationService.swift","class":"Content/state/Functional","status":"remaining"},
+    {"id":"settings_backend_offline","source":"Views/SettingsView.swift; Services/BackendClient.swift","class":"Content/state","status":"source-only"},
+    {"id":"settings_backend_configured","source":"Views/SettingsView.swift; Services/BackendClient.swift","class":"Content/state/Functional","status":"source-only"},
+    {"id":"settings_leave_confirm","source":"Views/SettingsView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"settings_role_reset","source":"Views/SettingsView.swift; ViewModels/AppModel.swift","class":"Functional","status":"source-only"},
+    {"id":"root_send_error","source":"Views/RootView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"widget_voice_entry","source":"Views/RootView.swift; ButtonWidget/ButtonWidget.swift","class":"Functional","status":"remaining"},
+    {"id":"parent_tablet_landscape","source":"Views/Parent/ParentHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual","status":"source-only"},
+    {"id":"child_large_text","source":"Views/Child/ChildHomeView.swift","class":"Visual/Functional","status":"source-only"}
+  ],
+  "commands": {
+    "iosScreenshot": "scripts/capture-ios-baseline.sh <simulator-udid>",
+    "androidScreenshot": "ANDROID_SERIAL=<serial> scripts/capture-android-catalog.sh",
+    "hashes": "shasum -a 256 docs/screenshots/ios/*.png docs/screenshots/android/*.png"
+  },
+  "exceptionCandidates": [
+    "permission dialogs", "system settings", "keyboard", "share sheet", "system bars",
+    "system navigation gestures", "notification system chrome", "background BLE OS restrictions"
+  ]
+}

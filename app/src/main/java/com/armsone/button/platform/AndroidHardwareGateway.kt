@@ -1,0 +1,382 @@
+package com.armsone.button.platform
+
+import android.Manifest
+import android.content.Intent
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import com.armsone.button.data.BackendConfiguration
+import com.armsone.button.data.HttpBackendClient
+import com.armsone.button.model.CallEvent
+import com.armsone.button.model.FamilyRole
+import com.armsone.button.model.FamilySpace
+import com.armsone.button.state.AppHardwareGateway
+import com.armsone.button.state.AppPhase
+import com.armsone.button.state.AppRole
+import com.armsone.button.state.AppUiState
+import com.armsone.button.state.IncomingKind
+import com.armsone.button.state.IncomingUi
+import com.armsone.button.state.TransportUiStatus
+import com.armsone.button.state.VoiceState
+import com.armsone.button.transport.AndroidBleTransport
+import com.armsone.button.transport.TransportStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
+import java.util.UUID
+
+/** Connects the Compose state machine to Android hardware and the iOS-compatible transports. */
+class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardwareGateway {
+    var onIncoming: (IncomingUi) -> Unit = {}
+    var onAcknowledge: (String) -> Unit = {}
+    var onTransportStatus: (TransportUiStatus, Int) -> Unit = { _, _ -> }
+    var onPresence: (String, String, AppRole?) -> Unit = { _, _, _ -> }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val transport = AndroidBleTransport(activity)
+    private val sound = DingDongPlayer()
+    private val voiceRecorder = VoiceRecorder(activity)
+    private val voicePlayer = VoiceMessagePlayer(activity)
+    private val flash = FlashAlertService(activity)
+    private val notifications = NotificationHelper(activity)
+    private val backendConfiguration = BackendConfiguration.load(activity)
+    private val backend = HttpBackendClient(backendConfiguration)
+    private val prefs = activity.getSharedPreferences("button_hardware", Context.MODE_PRIVATE)
+    private val deviceID: UUID = prefs.getString("deviceID", null)?.let {
+        runCatching { UUID.fromString(it) }.getOrNull()
+    } ?: UUID.randomUUID().also { prefs.edit().putString("deviceID", it.toString()).apply() }
+
+    private var activeSpace: FamilySpace? = null
+    private var activeName = ""
+    private var activeRole: AppRole? = null
+    private var activeKey: String? = null
+    private var presenceJob: Job? = null
+    private var bluetoothPermissionRequested = false
+    private var pendingNotificationStatus: ((String) -> Unit)? = null
+    private var pendingVoiceState: ((VoiceState) -> Unit)? = null
+    private var pendingVoiceFinished: ((ByteArray?) -> Unit)? = null
+    private var pendingMicrophonePermission: ((Boolean) -> Unit)? = null
+    private val seenEvents = mutableMapOf<UUID, Instant>()
+    private var lastVoiceData: ByteArray? = null
+
+    private val notificationPermissionLauncher = activity.registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        pendingNotificationStatus?.invoke(if (granted) "허용됨" else "차단됨")
+        pendingNotificationStatus = null
+    }
+
+    private val microphonePermissionLauncher = activity.registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        pendingMicrophonePermission?.invoke(granted)
+        pendingMicrophonePermission = null
+    }
+
+    private val bluetoothPermissionLauncher = activity.registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        bluetoothPermissionRequested = false
+        if (grants.values.all { it }) {
+            activeSpace?.let { transport.start(it, activeName.ifBlank { "가족" }) }
+        } else {
+            activeKey = null
+            onTransportStatus(TransportUiStatus.IDLE, 0)
+        }
+    }
+
+    init {
+        transport.onStatusChange = { status ->
+            val mapped = when (status) {
+                TransportStatus.Idle -> TransportUiStatus.IDLE to 0
+                TransportStatus.Searching -> TransportUiStatus.SEARCHING to 0
+                is TransportStatus.Connected -> TransportUiStatus.CONNECTED to status.peerCount
+                TransportStatus.Demo -> TransportUiStatus.DEMO to 0
+            }
+            activity.runOnUiThread { onTransportStatus(mapped.first, mapped.second) }
+        }
+        transport.onEvent = ::accept
+        voiceRecorder.onStateChange = { state ->
+            activity.runOnUiThread {
+                when (state) {
+                    VoiceRecorder.State.RequestingPermission -> pendingVoiceState?.invoke(VoiceState.REQUESTING_PERMISSION)
+                    is VoiceRecorder.State.Recording -> pendingVoiceState?.invoke(VoiceState.RECORDING)
+                    VoiceRecorder.State.Denied -> pendingVoiceState?.invoke(VoiceState.DENIED)
+                    is VoiceRecorder.State.Recorded -> {
+                        val data = voiceRecorder.recordedData
+                        pendingVoiceFinished?.invoke(data)
+                        pendingVoiceFinished = null
+                        pendingVoiceState = null
+                    }
+                    VoiceRecorder.State.Idle -> Unit
+                }
+            }
+        }
+    }
+
+    fun sync(state: AppUiState) {
+        if (state.fixtureId != null || state.phase != AppPhase.HOME || state.invite == null || state.isDemoMode) {
+            stopActiveTransport()
+            return
+        }
+        activeName = state.displayName.ifBlank { "가족" }
+        activeRole = state.role
+        val invite = state.invite
+        val key = "${invite.spaceId}|${invite.secret}"
+        if (key == activeKey) return
+        val space = runCatching {
+            FamilySpace(UUID.fromString(invite.spaceId), invite.spaceName, invite.secret)
+        }.getOrNull() ?: return
+        activeKey = key
+        activeSpace = space
+        ensureBluetoothPermissions()
+        if (hasBluetoothPermissions()) transport.start(space, activeName)
+        presenceJob?.cancel()
+        presenceJob = scope.launch {
+            while (isActive && activeKey == key) {
+                val event = makeEvent(CallEvent.Kind.Presence)
+                runCatching { transport.send(event) }
+                delay(8_000)
+            }
+        }
+    }
+
+    override fun beginVoiceRecording(
+        maxSeconds: Int,
+        onState: (VoiceState) -> Unit,
+        onFinished: (ByteArray?) -> Unit,
+    ) {
+        pendingVoiceState = onState
+        pendingVoiceFinished = onFinished
+        val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        voiceRecorder.beginPressHold(
+            if (granted) VoiceRecorder.PermissionStatus.GRANTED else VoiceRecorder.PermissionStatus.NOT_DETERMINED,
+        ) { callback ->
+            pendingMicrophonePermission = callback
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    override fun stopVoiceRecording() = voiceRecorder.endPressHold()
+
+    override fun playDingDong() = sound.play()
+
+    override fun playSiren() = sound.playSiren()
+
+    override fun playVoice(data: ByteArray) = voicePlayer.play(data)
+
+    override fun stopPlayback() {
+        voicePlayer.stop()
+        sound.stop()
+    }
+
+    override fun send(kind: IncomingKind, voice: ByteArray?, onError: (String) -> Unit) {
+        val callKind = when (kind) {
+            IncomingKind.QUIET_ALERT -> CallEvent.Kind.QuietAlert
+            IncomingKind.DING_DONG -> CallEvent.Kind.DingDong
+            IncomingKind.VOICE_MESSAGE -> CallEvent.Kind.VoiceMessage
+        }
+        val event = runCatching { makeEvent(callKind, voice) }.getOrElse {
+            onError("전송에 실패했어요. (${it.message ?: "알 수 없는 오류"})")
+            return
+        }
+        val ble = runCatching { transport.send(event) }
+        if (!backendConfiguration.isConfigured) {
+            if (ble.isFailure) onError(ble.exceptionOrNull()?.message ?: "전송에 실패했어요.")
+            return
+        }
+        scope.launch {
+            val remote = runCatching { backend.send(event, activeSpace?.secret.orEmpty()) }
+            if (ble.isFailure && remote.isFailure) {
+                activity.runOnUiThread {
+                    onError(remote.exceptionOrNull()?.message ?: ble.exceptionOrNull()?.message ?: "전송에 실패했어요.")
+                }
+            }
+        }
+    }
+
+    override fun acknowledge(eventId: String) {
+        val original = runCatching { UUID.fromString(eventId) }.getOrNull() ?: return
+        val event = runCatching { makeEvent(CallEvent.Kind.Acknowledge).also { it.ackFor = original } }.getOrNull()
+            ?: return
+        runCatching { transport.send(event) }
+        if (backendConfiguration.isConfigured) scope.launch {
+            runCatching { backend.send(event, activeSpace?.secret.orEmpty()) }
+        }
+    }
+
+    override fun requestNotificationPermission(onStatus: (String) -> Unit) {
+        if (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            onStatus("허용됨")
+            return
+        }
+        pendingNotificationStatus = onStatus
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    override fun notificationStatus(): String = if (
+        Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+            activity,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+    ) "허용됨" else "허용 필요"
+
+    override fun onForeground() = notifications.clearDeliveredCalls()
+
+    override fun enableRemoteNotifications(onStatus: (String) -> Unit) {
+        onStatus("APNs 등록 실패: Android push 제공자가 연결되지 않음")
+    }
+
+    override fun openNotificationSettings() {
+        activity.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        })
+    }
+
+    override fun openMicrophoneSettings() {
+        activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:${activity.packageName}")
+        })
+    }
+
+    override fun share(text: String) {
+        activity.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }, "초대 링크 공유"))
+    }
+
+    fun close() {
+        stopActiveTransport()
+        voiceRecorder.reset()
+        voicePlayer.stop()
+        sound.close()
+        flash.stop()
+        scope.cancel()
+    }
+
+    private fun accept(event: CallEvent) {
+        val space = activeSpace ?: return
+        if (event.spaceID != space.id || event.senderID == deviceID) return
+        val now = Instant.now()
+        synchronized(seenEvents) {
+            seenEvents.entries.removeAll { it.value.isBefore(now.minusSeconds(600)) }
+            if (seenEvents.putIfAbsent(event.id, now) != null) return
+        }
+        val memberID = (event.senderID ?: event.id).toString()
+        val memberRole = when (event.senderRole) {
+            FamilyRole.Parent -> AppRole.PARENT
+            FamilyRole.Child -> AppRole.CHILD
+            null -> null
+        }
+        activity.runOnUiThread { onPresence(memberID, event.senderName, memberRole) }
+        when (event.kind) {
+            CallEvent.Kind.Acknowledge -> activity.runOnUiThread { onAcknowledge(event.senderName) }
+            CallEvent.Kind.Presence -> Unit
+            CallEvent.Kind.QuietAlert, CallEvent.Kind.DingDong, CallEvent.Kind.VoiceMessage -> {
+                flash.flash()
+                if (event.kind == CallEvent.Kind.DingDong) sound.play()
+                if (event.kind == CallEvent.Kind.VoiceMessage) {
+                    event.voiceData?.let {
+                        lastVoiceData = it
+                        voicePlayer.play(it)
+                    }
+                }
+                val inForeground = activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                if (inForeground) {
+                    val incoming = IncomingUi(
+                        id = event.id.toString(),
+                        senderName = event.senderName,
+                        kind = when (event.kind) {
+                            CallEvent.Kind.QuietAlert -> IncomingKind.QUIET_ALERT
+                            CallEvent.Kind.DingDong -> IncomingKind.DING_DONG
+                            else -> IncomingKind.VOICE_MESSAGE
+                        },
+                        timeLabel = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+                            .withLocale(Locale.getDefault())
+                            .withZone(ZoneId.systemDefault())
+                            .format(event.sentAt),
+                        voiceData = event.voiceData,
+                    )
+                    activity.runOnUiThread { onIncoming(incoming) }
+                } else {
+                    notifications.notify(event)
+                }
+            }
+        }
+    }
+
+    private fun makeEvent(kind: CallEvent.Kind, voice: ByteArray? = null): CallEvent {
+        val space = activeSpace ?: throw IllegalStateException("먼저 가족 공간에 참여해 주세요.")
+        return CallEvent(
+            kind = kind,
+            spaceID = space.id,
+            senderName = activeName.ifBlank { "가족" },
+            senderID = deviceID,
+            senderRole = when (activeRole) {
+                AppRole.PARENT -> FamilyRole.Parent
+                AppRole.CHILD -> FamilyRole.Child
+                null -> null
+            },
+            voiceData = voice,
+        )
+    }
+
+    private fun ensureBluetoothPermissions() {
+        if (hasBluetoothPermissions() || bluetoothPermissionRequested) return
+        bluetoothPermissionRequested = true
+        val required = if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+            )
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        bluetoothPermissionLauncher.launch(required)
+    }
+
+    private fun stopActiveTransport() {
+        presenceJob?.cancel()
+        presenceJob = null
+        if (activeKey != null) transport.stop()
+        activeKey = null
+        activeSpace = null
+        activeName = ""
+        activeRole = null
+        synchronized(seenEvents) { seenEvents.clear() }
+    }
+
+    private fun hasBluetoothPermissions(): Boolean = if (Build.VERSION.SDK_INT >= 31) {
+        listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_ADVERTISE,
+        ).all { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
+    } else {
+        ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+}
