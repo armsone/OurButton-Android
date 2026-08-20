@@ -23,7 +23,7 @@ Build 13 also matches the latest iOS one-recipient calling contract: `targetID` 
 - Manifest permissions: `INTERNET`, `RECORD_AUDIO`, `CAMERA`, `FLASHLIGHT`, `POST_NOTIFICATIONS` (API 33+), `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, and `BLUETOOTH_ADVERTISE` (API 31+), with legacy Bluetooth/location declarations scoped to their applicable older APIs.
 - Declare BLE feature support as optional unless product policy intentionally excludes unsupported devices.
 - A concrete Android push provider is not present in the supplied iOS repository. `PushTokenProvider` therefore remains an explicit boundary; BLE and configured HTTP sending work, but process-absent remote receiving needs FCM credentials/server support.
-- Foreground ding-dong audio is synthesized to the iOS frequencies/timing. The notification channel is versioned; exact custom channel audio would require adding the licensed source audio as `res/raw/dingdong3`.
+- Foreground ding-dong audio is synthesized to the iOS frequencies/timing. The versioned notification channel uses the original iOS `dingdong3.wav` bundled as `res/raw/dingdong3`.
 - Background BLE is **not guaranteed**. Current BLE work is lifecycle-safe foreground best effort. Process death, force-stop, Doze, OEM restrictions and Android background-start rules can stop scanning/advertising. A foreground service would require a persistent user-visible notification plus service declarations/types and should be added only as an explicit product decision.
 
 The implementation pass verified `testDebugUnitTest`, `assembleDebug`, and `assembleRelease`, then installed versionCode 13 with data preservation and cold-launched it on SM-F968N and SM-T500. GitHub publication remains a separate release step.

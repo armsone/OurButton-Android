@@ -18,7 +18,7 @@ import com.armsone.button.R
 class NotificationHelper(private val context: Context, dingDongSound: Uri? = null) {
     companion object {
         const val QUIET_CHANNEL_ID = "family_calls_quiet_v1"
-        const val DING_DONG_CHANNEL_ID = "family_calls_ding_dong_v1"
+        const val DING_DONG_CHANNEL_ID = "family_calls_ding_dong_v2"
         private const val CHANNEL_GROUP_ID = "family_calls"
         private const val NOTIFICATION_TAG = "family-call"
     }

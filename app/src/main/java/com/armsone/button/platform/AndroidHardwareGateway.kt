@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import com.armsone.button.R
 import com.armsone.button.data.BackendConfiguration
 import com.armsone.button.data.HttpBackendClient
 import com.armsone.button.model.CallEvent
@@ -54,7 +55,10 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     private val voiceRecorder = VoiceRecorder(activity)
     private val voicePlayer = VoiceMessagePlayer(activity)
     private val flash = FlashAlertService(activity)
-    private val notifications = NotificationHelper(activity)
+    private val notifications = NotificationHelper(
+        activity,
+        Uri.parse("android.resource://${activity.packageName}/${R.raw.dingdong3}"),
+    )
     private val backendConfiguration = BackendConfiguration.load(activity)
     private val backend = HttpBackendClient(backendConfiguration)
     private val prefs = activity.getSharedPreferences("button_hardware", Context.MODE_PRIVATE)
