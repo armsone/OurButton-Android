@@ -14,7 +14,9 @@ Use a task-specific Gradle/build directory when concurrent work could share mach
 
 ## Matchup capture
 
-State inventory, evidence limits, pending exceptions and capture commands are in [docs/matchup-matrix.md](docs/matchup-matrix.md) and [docs/matchup-manifest.json](docs/matchup-manifest.json). The debug-only Android catalog currently captures 27 states with `scripts/capture-android-catalog.sh`; original PNGs are under `docs/screenshots/android`. The clean iOS welcome baseline and its OS permission surface are under `docs/screenshots/ios`.
+State inventory, evidence limits, pending exceptions and capture commands are in [docs/matchup-matrix.md](docs/matchup-matrix.md) and [docs/matchup-manifest.json](docs/matchup-manifest.json). The debug-only catalog captures 32 deterministic states on both a physical phone and tablet; original PNGs are under `docs/screenshots/android-phone` and `docs/screenshots/android-tablet`. The clean iOS welcome baseline and its OS permission surface are under `docs/screenshots/ios`.
+
+Build 13 also matches the latest iOS one-recipient calling contract: `targetID` remains an optional v1 JSON field, non-target devices relay without alerting, ACKs return to the original sender and are displayed only when correlated to a recently sent call, and parent/child homes expose recipient selection plus sent/acknowledged activity banners.
 
 ## Known platform boundary
 
@@ -24,4 +26,4 @@ State inventory, evidence limits, pending exceptions and capture commands are in
 - Foreground ding-dong audio is synthesized to the iOS frequencies/timing. The notification channel is versioned; exact custom channel audio would require adding the licensed source audio as `res/raw/dingdong3`.
 - Background BLE is **not guaranteed**. Current BLE work is lifecycle-safe foreground best effort. Process death, force-stop, Doze, OEM restrictions and Android background-start rules can stop scanning/advertising. A foreground service would require a persistent user-visible notification plus service declarations/types and should be added only as an explicit product decision.
 
-The implementation pass verified `testDebugUnitTest` and `assembleDebug`. No commit, push, publication, physical-device installation, or external deployment is performed by these commands.
+The implementation pass verified `testDebugUnitTest`, `assembleDebug`, and `assembleRelease`, then installed versionCode 13 with data preservation and cold-launched it on SM-F968N and SM-T500. GitHub publication remains a separate release step.

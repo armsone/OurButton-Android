@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
                 AppViewModel(application, hardware) as T
         })[AppViewModel::class.java]
+        model.attachHardware(hardware)
         hardware.onIncoming = model::presentIncoming
         hardware.onAcknowledge = model::presentAcknowledge
         hardware.onTransportStatus = model::updateTransport

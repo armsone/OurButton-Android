@@ -17,6 +17,7 @@ class CallEvent(
     val id: UUID = UUID.randomUUID(),
     var senderID: UUID? = null,
     var senderRole: FamilyRole? = null,
+    var targetID: UUID? = null,
     val sentAt: Instant = Instant.now(),
     var voiceData: ByteArray? = null,
     var ackFor: UUID? = null,
@@ -36,7 +37,7 @@ class CallEvent(
     override fun equals(other: Any?): Boolean = other is CallEvent &&
         version == other.version && id == other.id && kind == other.kind &&
         spaceID == other.spaceID && senderName == other.senderName && senderID == other.senderID &&
-        senderRole == other.senderRole && sentAt == other.sentAt &&
+        senderRole == other.senderRole && targetID == other.targetID && sentAt == other.sentAt &&
         ((voiceData == null && other.voiceData == null) ||
             (voiceData != null && other.voiceData != null && voiceData!!.contentEquals(other.voiceData!!))) &&
         ackFor == other.ackFor
@@ -49,6 +50,7 @@ class CallEvent(
         result = 31 * result + senderName.hashCode()
         result = 31 * result + (senderID?.hashCode() ?: 0)
         result = 31 * result + (senderRole?.hashCode() ?: 0)
+        result = 31 * result + (targetID?.hashCode() ?: 0)
         result = 31 * result + sentAt.hashCode()
         result = 31 * result + (voiceData?.contentHashCode() ?: 0)
         return 31 * result + (ackFor?.hashCode() ?: 0)
@@ -80,6 +82,7 @@ object CallEventCoder {
             .put("sentAt", event.sentAt.truncatedTo(ChronoUnit.SECONDS).toString())
         event.senderID?.let { json.put("senderID", it.toString().uppercase()) }
         event.senderRole?.let { json.put("senderRole", it.rawValue) }
+        event.targetID?.let { json.put("targetID", it.toString().uppercase()) }
         event.voiceData?.let { json.put("voiceData", Base64.getEncoder().encodeToString(it)) }
         event.ackFor?.let { json.put("ackFor", it.toString().uppercase()) }
         return json.toString().toByteArray(StandardCharsets.UTF_8)
@@ -103,6 +106,7 @@ object CallEventCoder {
                 senderRole = json.optionalString("senderRole")?.let {
                     FamilyRole.fromRawValue(it) ?: throw IllegalArgumentException()
                 },
+                targetID = json.optionalString("targetID")?.let(UUID::fromString),
                 sentAt = Instant.parse(json.requiredString("sentAt")),
                 voiceData = json.optionalString("voiceData")?.let(Base64.getDecoder()::decode),
                 ackFor = json.optionalString("ackFor")?.let(UUID::fromString),

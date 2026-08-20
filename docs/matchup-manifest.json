@@ -6,13 +6,25 @@
   "status": "Android source/runtime catalog verified; full paired visual parity unverified because iOS fixtures are absent",
   "verification": {
     "iosUnitTests": "28 passed",
-    "androidGradle": "testDebugUnitTest and assembleDebug passed",
-    "androidCatalog": {
-      "count": 27,
-      "root": "docs/screenshots/android",
-      "pixelDimensions": "1080x2424",
-      "device": "task AVD emulator-5580"
-    },
+    "androidGradle": "testDebugUnitTest, assembleDebug, and assembleRelease passed for versionCode 13",
+    "androidCatalogs": [
+      {
+        "count": 32,
+        "root": "docs/screenshots/android-phone",
+        "pixelDimensions": "822x1918",
+        "densityDpi": 320,
+        "device": "SM-F968N",
+        "osVersion": "Android 16"
+      },
+      {
+        "count": 32,
+        "root": "docs/screenshots/android-tablet",
+        "pixelDimensions": "1200x2000",
+        "densityDpi": 240,
+        "device": "SM-T500",
+        "osVersion": "Android 10"
+      }
+    ],
     "iosBaseline": {
       "root": "docs/screenshots/ios",
       "pixelDimensions": "1206x2622",
@@ -48,6 +60,8 @@
     {"id":"parent_idle","source":"Views/Parent/ParentHomeView.swift","class":"Visual/Content/state","status":"source-only"},
     {"id":"parent_connected","source":"Views/Parent/ParentHomeView.swift","class":"Content/state","status":"source-only"},
     {"id":"parent_demo","source":"Views/Parent/ParentHomeView.swift","class":"Content/state","status":"source-only"},
+    {"id":"parent_targeted","source":"Views/Parent/ParentHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual/Functional","status":"android-runtime"},
+    {"id":"parent_sent","source":"Views/Parent/ParentHomeView.swift; ViewModels/AppModel.swift","class":"Visual/Functional","status":"android-runtime"},
     {"id":"parent_ack","source":"Views/Parent/ParentHomeView.swift","class":"Visual/Functional","status":"source-only"},
     {"id":"parent_quiet_tap","source":"Views/Parent/ParentHomeView.swift; ViewModels/AppModel.swift","class":"Functional","status":"source-only"},
     {"id":"parent_quiet_hold","source":"Views/Parent/ParentHomeView.swift; Services/DingDongPlayer.swift","class":"Functional","status":"source-only"},
@@ -56,6 +70,9 @@
     {"id":"child_idle","source":"Views/Child/ChildHomeView.swift","class":"Visual/Content/state","status":"source-only"},
     {"id":"child_connected","source":"Views/Child/ChildHomeView.swift","class":"Content/state/Functional","status":"source-only"},
     {"id":"child_demo","source":"Views/Child/ChildHomeView.swift","class":"Content/state","status":"source-only"},
+    {"id":"child_targeted","source":"Views/Child/ChildHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual/Functional","status":"android-runtime"},
+    {"id":"child_sent","source":"Views/Child/ChildHomeView.swift; ViewModels/AppModel.swift","class":"Visual/Functional","status":"android-runtime"},
+    {"id":"child_ack","source":"Views/Child/ChildHomeView.swift; ViewModels/AppModel.swift","class":"Visual/Functional","status":"android-runtime"},
     {"id":"incoming_quiet","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
     {"id":"incoming_ding","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
     {"id":"incoming_voice","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
@@ -83,7 +100,7 @@
   "commands": {
     "iosScreenshot": "scripts/capture-ios-baseline.sh <simulator-udid>",
     "androidScreenshot": "ANDROID_SERIAL=<serial> scripts/capture-android-catalog.sh",
-    "hashes": "shasum -a 256 docs/screenshots/ios/*.png docs/screenshots/android/*.png"
+    "hashes": "shasum -a 256 docs/screenshots/ios/*.png docs/screenshots/android-phone/*.png docs/screenshots/android-tablet/*.png"
   },
   "exceptionCandidates": [
     "permission dialogs", "system settings", "keyboard", "share sheet", "system bars",

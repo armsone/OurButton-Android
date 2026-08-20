@@ -22,6 +22,9 @@ enum class AppRoute { WELCOME, CREATE_SPACE, JOIN_SPACE, SETTINGS }
 enum class TransportUiStatus { IDLE, SEARCHING, CONNECTED, DEMO }
 enum class IncomingKind { QUIET_ALERT, DING_DONG, VOICE_MESSAGE }
 enum class VoiceState { IDLE, REQUESTING_PERMISSION, DENIED, RECORDING, SENT }
+enum class CallActivityKind { SENT, ACKNOWLEDGED }
+
+data class CallActivityUi(val kind: CallActivityKind, val message: String)
 
 data class PresenceUi(
     val id: String,
@@ -38,6 +41,7 @@ data class InviteUi(val spaceId: String, val spaceName: String, val secret: Stri
 data class IncomingUi(
     val id: String = UUID.randomUUID().toString(),
     val senderName: String,
+    val senderID: String? = null,
     val kind: IncomingKind,
     val timeLabel: String = "오후 3:00",
     val voiceData: ByteArray? = null,
@@ -60,7 +64,8 @@ data class AppUiState(
     val showVoice: Boolean = false,
     val voiceState: VoiceState = VoiceState.IDLE,
     val incoming: IncomingUi? = null,
-    val acknowledgeSender: String? = null,
+    val selectedTargetID: String? = null,
+    val callActivity: CallActivityUi? = null,
     val errorMessage: String? = null,
     val quietHoldTriggered: Boolean = false,
     val notificationStatus: String = "허용 필요",
@@ -82,14 +87,20 @@ interface AppHardwareGateway {
     fun playSiren() = Unit
     fun playVoice(data: ByteArray) = Unit
     fun stopPlayback() = Unit
-    fun send(kind: IncomingKind, voice: ByteArray? = null, onError: (String) -> Unit = {}) = Unit
-    fun acknowledge(eventId: String) = Unit
+    fun send(
+        kind: IncomingKind,
+        voice: ByteArray? = null,
+        targetID: String? = null,
+        onError: (String) -> Unit = {},
+    ): String? = null
+    fun acknowledge(eventId: String, targetID: String? = null) = Unit
     fun requestNotificationPermission(onStatus: (String) -> Unit) = Unit
     fun enableRemoteNotifications(onStatus: (String) -> Unit) = Unit
     fun openNotificationSettings() = Unit
     fun openMicrophoneSettings() = Unit
     fun share(text: String) = Unit
     fun notificationStatus(): String = "허용 필요"
+    fun serverStatus(): String = "구성되지 않음 (오프라인)"
     fun onForeground() = Unit
 }
 
@@ -97,7 +108,7 @@ object NoOpHardwareGateway : AppHardwareGateway
 
 class AppViewModel(
     application: Application,
-    private val hardware: AppHardwareGateway,
+    private var hardware: AppHardwareGateway,
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, NoOpHardwareGateway)
     private val prefs = application.getSharedPreferences("button_state", Context.MODE_PRIVATE)
@@ -108,7 +119,12 @@ class AppViewModel(
     private var incomingDismissJob: Job? = null
     private var voiceLimitJob: Job? = null
     private val memberExpiryJobs = mutableMapOf<String, Job>()
+    private val sentCallIDs = mutableMapOf<String, Long>()
     private var suppressNextQuietTap = false
+
+    fun attachHardware(gateway: AppHardwareGateway) {
+        hardware = gateway
+    }
 
     fun navigate(route: AppRoute) = _uiState.update { it.copy(route = route) }
     fun back() = _uiState.update { it.copy(route = AppRoute.WELCOME) }
@@ -151,12 +167,11 @@ class AppViewModel(
 
     fun showInvite(show: Boolean) = _uiState.update { it.copy(showInvite = show) }
     fun showVoice(show: Boolean) = _uiState.update { it.copy(showVoice = show, voiceState = VoiceState.IDLE) }
-    fun clearAcknowledge() = _uiState.update { it.copy(acknowledgeSender = null) }
+    fun clearCallActivity() = _uiState.update { it.copy(callActivity = null) }
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
     fun sendDingDong() {
-        if (_uiState.value.isDemoMode) demoEcho(IncomingKind.DING_DONG)
-        else hardware.send(IncomingKind.DING_DONG) { showError(it) }
+        sendCall(IncomingKind.DING_DONG)
     }
 
     fun beginQuietHold() {
@@ -181,8 +196,7 @@ class AppViewModel(
             _uiState.update { it.copy(quietHoldTriggered = false) }
             return
         }
-        if (_uiState.value.isDemoMode) demoEcho(IncomingKind.QUIET_ALERT)
-        else hardware.send(IncomingKind.QUIET_ALERT) { showError(it) }
+        sendCall(IncomingKind.QUIET_ALERT)
     }
 
     fun beginVoiceHold() {
@@ -213,8 +227,7 @@ class AppViewModel(
             _uiState.update { it.copy(voiceState = VoiceState.IDLE) }
             return
         }
-        if (_uiState.value.isDemoMode) demoEcho(IncomingKind.VOICE_MESSAGE, data)
-        else hardware.send(IncomingKind.VOICE_MESSAGE, data) { showError(it) }
+        sendCall(IncomingKind.VOICE_MESSAGE, data)
         _uiState.update { it.copy(voiceState = VoiceState.SENT) }
         viewModelScope.launch {
             delay(2_000)
@@ -240,7 +253,14 @@ class AppViewModel(
     fun acknowledgeIncoming() {
         val event = _uiState.value.incoming ?: return
         hardware.stopPlayback()
-        hardware.acknowledge(event.id)
+        if (_uiState.value.isDemoMode) {
+            viewModelScope.launch {
+                delay(1_200)
+                presentAcknowledge(senderName(), event.id)
+            }
+        } else {
+            hardware.acknowledge(event.id, event.senderID)
+        }
         _uiState.update { it.copy(incoming = null) }
     }
 
@@ -283,8 +303,23 @@ class AppViewModel(
         if (it.isDemoMode) it else it.copy(transportStatus = status, connectedCount = connectedCount)
     }
 
-    fun presentAcknowledge(senderName: String) = _uiState.update {
-        it.copy(acknowledgeSender = senderName)
+    fun presentAcknowledge(senderName: String, ackFor: String?) {
+        val originalID = ackFor ?: return
+        pruneSentCallIDs()
+        if (!sentCallIDs.containsKey(originalID)) return
+        _uiState.update {
+            it.copy(callActivity = CallActivityUi(
+                CallActivityKind.ACKNOWLEDGED,
+                "${senderName}님이 호출을 확인했어요.",
+            ))
+        }
+    }
+
+    fun toggleRecipient(member: PresenceUi) {
+        if (member.isCurrentDevice) return
+        _uiState.update {
+            it.copy(selectedTargetID = if (it.selectedTargetID == member.id) null else member.id)
+        }
     }
 
     fun updateRemoteMember(id: String, name: String, role: AppRole?) {
@@ -298,14 +333,25 @@ class AppViewModel(
         memberExpiryJobs.remove(id)?.cancel()
         memberExpiryJobs[id] = viewModelScope.launch {
             delay(600_000)
-            _uiState.update { it.copy(members = it.members.filterNot { member -> member.id == id }) }
+            _uiState.update {
+                it.copy(
+                    members = it.members.filterNot { member -> member.id == id },
+                    selectedTargetID = it.selectedTargetID?.takeUnless { selected -> selected == id },
+                )
+            }
             memberExpiryJobs.remove(id)
         }
     }
 
     fun onForeground() {
+        if (_uiState.value.fixtureId != null) return
         hardware.onForeground()
-        _uiState.update { it.copy(notificationStatus = hardware.notificationStatus()) }
+        _uiState.update {
+            it.copy(
+                notificationStatus = hardware.notificationStatus(),
+                serverStatus = hardware.serverStatus(),
+            )
+        }
     }
 
     fun onBackground() = cancelTransientWork()
@@ -334,7 +380,12 @@ class AppViewModel(
             "setup_join_confirmed" -> AppUiState(route = AppRoute.JOIN_SPACE)
             "role_selection" -> base.copy(phase = AppPhase.ROLE_SELECTION)
             "parent_home" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT)
-            "parent_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, acknowledgeSender = "첫째")
+            "parent_home_targeted" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                selectedTargetID = FIXTURE_CHILD_ID)
+            "parent_home_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                callActivity = CallActivityUi(CallActivityKind.SENT, "첫째님에게 띵동 호출을 보냈어요."))
+            "parent_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째님이 호출을 확인했어요."))
             "parent_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 isDemoMode = true, transportStatus = TransportUiStatus.DEMO)
             "parent_home_idle" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
@@ -342,6 +393,12 @@ class AppViewModel(
             "parent_home_searching" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 transportStatus = TransportUiStatus.SEARCHING, connectedCount = 0)
             "child_home" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD)
+            "child_home_targeted" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
+                selectedTargetID = FIXTURE_CHILD_ID)
+            "child_home_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
+                callActivity = CallActivityUi(CallActivityKind.SENT, "모두에게 조용한 호출을 보냈어요."))
+            "child_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
+                callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째님이 호출을 확인했어요."))
             "child_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 isDemoMode = true, transportStatus = TransportUiStatus.DEMO)
             "invite_qr" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showInvite = true)
@@ -374,7 +431,7 @@ class AppViewModel(
             transportStatus = TransportUiStatus.CONNECTED, connectedCount = 1,
             members = listOf(
                 PresenceUi("current", "엄마", AppRole.PARENT, true),
-                PresenceUi("child", "첫째", AppRole.CHILD, false),
+                PresenceUi(FIXTURE_CHILD_ID, "첫째", AppRole.CHILD, false),
             ))
     }
 
@@ -408,11 +465,49 @@ class AppViewModel(
         return value.substring(0, value.offsetByCodePoints(0, maximum))
     }
 
-    private fun demoEcho(kind: IncomingKind, voice: ByteArray? = null) {
+    private fun demoEcho(eventID: String, kind: IncomingKind, voice: ByteArray? = null) {
         viewModelScope.launch {
             delay(1_200)
-            presentIncoming(IncomingUi(senderName = senderName(), kind = kind, voiceData = voice))
+            presentIncoming(IncomingUi(
+                id = eventID,
+                senderName = senderName(),
+                kind = kind,
+                voiceData = voice,
+            ))
         }
+    }
+
+    private fun sendCall(kind: IncomingKind, voice: ByteArray? = null) {
+        val state = _uiState.value
+        val target = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
+        val eventID = if (state.isDemoMode) {
+            UUID.randomUUID().toString().also { id ->
+                if (target == null) demoEcho(id, kind, voice)
+            }
+        } else {
+            hardware.send(kind, voice, target?.id) { showError(it) }
+        }
+        if (eventID != null) {
+            pruneSentCallIDs()
+            sentCallIDs[eventID] = System.currentTimeMillis()
+            val destination = target?.name?.let { "${it}님에게" } ?: "모두에게"
+            val title = when (kind) {
+                IncomingKind.QUIET_ALERT -> "조용한 호출"
+                IncomingKind.DING_DONG -> "띵동 호출"
+                IncomingKind.VOICE_MESSAGE -> "음성 메시지"
+            }
+            _uiState.update {
+                it.copy(callActivity = CallActivityUi(
+                    CallActivityKind.SENT,
+                    "$destination $title\uC744 \uBCF4\uB0C8\uC5B4\uC694.",
+                ))
+            }
+        }
+    }
+
+    private fun pruneSentCallIDs() {
+        val cutoff = System.currentTimeMillis() - 600_000
+        sentCallIDs.entries.removeAll { it.value < cutoff }
     }
 
     private fun cancelTransientWork() {
@@ -428,3 +523,5 @@ class AppViewModel(
     }
 
 }
+
+private const val FIXTURE_CHILD_ID = "87654321-4321-4321-4321-cba987654321"

@@ -68,6 +68,24 @@ class CallEventCodingTest {
     }
 
     @Test
+    fun targetedCallRoundTripsWithoutChangingProtocolVersion() {
+        val targetID = UUID.randomUUID()
+        val event = CallEvent(
+            kind = CallEvent.Kind.DingDong,
+            spaceID = spaceID,
+            senderName = "엄마",
+            targetID = targetID,
+        )
+        val encoded = CallEventCoder.encode(event)
+        val json = JSONObject(String(encoded, Charsets.UTF_8))
+        val decoded = CallEventCoder.decode(encoded)
+
+        assertEquals(1, json.getInt("version"))
+        assertEquals(targetID.toString().uppercase(), json.getString("targetID"))
+        assertEquals(targetID, decoded.targetID)
+    }
+
+    @Test
     fun invalidVoiceDataAndSenderFailToEncode() {
         val missing = CallEvent(CallEvent.Kind.VoiceMessage, spaceID = spaceID, senderName = "아빠")
         assertTrue(assertThrows(CallEventCodingError::class.java) {
@@ -111,5 +129,6 @@ class CallEventCodingTest {
         assertEquals(spaceID.toString().uppercase(), json.getString("spaceID"))
         assertEquals(1, json.getInt("version"))
         assertFalse(json.has("voiceData"))
+        assertFalse(json.has("targetID"))
     }
 }

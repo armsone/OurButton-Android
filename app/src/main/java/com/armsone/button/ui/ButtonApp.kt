@@ -78,6 +78,8 @@ import com.armsone.button.state.AppRole
 import com.armsone.button.state.AppRoute
 import com.armsone.button.state.AppUiState
 import com.armsone.button.state.AppViewModel
+import com.armsone.button.state.CallActivityKind
+import com.armsone.button.state.CallActivityUi
 import com.armsone.button.state.IncomingKind
 import com.armsone.button.state.IncomingUi
 import com.armsone.button.state.InviteUi
@@ -363,22 +365,16 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
             Modifier.weight(1f), { model.showVoice(true) })
     }
     Spacer(Modifier.height(18.dp))
-    PresenceCard(state.members)
+    PresenceCard(state.members, state.selectedTargetID, model::toggleRecipient)
     Spacer(Modifier.height(18.dp))
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TransportBadge(state)
         if (state.isDemoMode) Text("데모 모드: 보낸 호출이 이 기기로 다시 전달돼요.", fontSize = 12.sp, color = Purple)
     }
-    state.acknowledgeSender?.let {
+    state.callActivity?.let {
         Spacer(Modifier.height(18.dp))
-        Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("👍", color = Green)
-            Text("${it}님이 호출을 확인했어요.", fontSize = 15.sp, modifier = Modifier.weight(1f))
-            Text("✕", color = Secondary.copy(.45f), modifier = Modifier.clickable { model.clearAcknowledge() }
-                .testTag("dismiss_ack").semantics { contentDescription = "확인 알림 닫기" })
-        }
+        CallActivityBanner(it, model::clearCallActivity)
     }
 }
 
@@ -392,9 +388,13 @@ private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveCo
             Modifier.weight(1f), model::sendDingDong)
     }
     Spacer(Modifier.height(18.dp))
-    PresenceCard(state.members)
+    PresenceCard(state.members, state.selectedTargetID, model::toggleRecipient)
     Spacer(Modifier.height(18.dp))
     Box(Modifier.align(Alignment.CenterHorizontally)) { TransportBadge(state) }
+    state.callActivity?.let {
+        Spacer(Modifier.height(18.dp))
+        CallActivityBanner(it, model::clearCallActivity)
+    }
     Spacer(Modifier.height(18.dp))
     Column(Modifier.fillMaxWidth().shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black.copy(.05f),
         spotColor = Color.Black.copy(.05f)).background(Color.White, RoundedCornerShape(24.dp)).padding(32.dp),
@@ -437,7 +437,11 @@ private fun HomeAction(
 }
 
 @Composable
-private fun PresenceCard(members: List<PresenceUi>) {
+private fun PresenceCard(
+    members: List<PresenceUi>,
+    selectedID: String?,
+    onSelect: (PresenceUi) -> Unit,
+) {
     Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp))
         .border(1.dp, Secondary.copy(.15f), RoundedCornerShape(18.dp)).padding(14.dp).testTag("presence_list"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -446,7 +450,17 @@ private fun PresenceCard(members: List<PresenceUi>) {
             Text("${members.size}명", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Secondary)
         }
         members.forEach { member ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val selected = selectedID == member.id
+            Row(Modifier.fillMaxWidth()
+                .clickable(enabled = !member.isCurrentDevice) { onSelect(member) }
+                .semantics {
+                    contentDescription = if (member.isCurrentDevice) {
+                        "${member.name}, 현재 기기"
+                    } else {
+                        "${member.name}, 이 사람에게만 보내려면 선택하세요"
+                    }
+                }, verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(if (member.role == AppRole.PARENT) "♙" else "☺", color = if (member.isCurrentDevice) Accent else Green,
                     fontSize = 19.sp, textAlign = TextAlign.Center, modifier = Modifier.width(22.dp))
                 Column(Modifier.weight(1f)) {
@@ -454,9 +468,27 @@ private fun PresenceCard(members: List<PresenceUi>) {
                     val role = if (member.role == AppRole.PARENT) "부모" else if (member.role == AppRole.CHILD) "자녀" else "가족"
                     Text(if (member.isCurrentDevice) "이 기기 · $role" else "징검다리 연결 · $role", fontSize = 11.sp, color = Secondary)
                 }
-                Box(Modifier.size(8.dp).background(if (member.isCurrentDevice) Accent else Green, CircleShape))
+                if (selected) {
+                    Text("✓", color = Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Box(Modifier.size(8.dp).background(if (member.isCurrentDevice) Accent else Green, CircleShape))
+                }
             }
         }
+        Text(if (selectedID == null) "선택하지 않으면 모두에게 보내요." else "선택한 한 사람에게만 보내요.",
+            fontSize = 11.sp, color = Secondary)
+    }
+}
+
+@Composable
+private fun CallActivityBanner(activity: CallActivityUi, dismiss: () -> Unit) {
+    val acknowledged = activity.kind == CallActivityKind.ACKNOWLEDGED
+    Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (acknowledged) "👍" else "➤", color = if (acknowledged) Green else Accent)
+        Text(activity.message, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text("✕", color = Secondary.copy(.45f), modifier = Modifier.clickable(onClick = dismiss)
+            .testTag("dismiss_call_activity").semantics { contentDescription = "호출 활동 닫기" })
     }
 }
 
@@ -622,7 +654,7 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
             SettingsButton("공간 나가기", "leave_space", Red) { confirmLeave = true }
         }
         Spacer(Modifier.height(24.dp))
-        Text("근거리 연결 (Wi-Fi + Bluetooth)", fontSize = 13.sp, color = Secondary,
+        Text("근거리 연결 (Bluetooth)", fontSize = 13.sp, color = Secondary,
             modifier = Modifier.padding(start = 16.dp, bottom = 6.dp))
         SettingsSection(null) {
             Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -637,20 +669,20 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
             if (state.notificationStatus == "허용 필요") SettingsButton("잠금화면 알림 허용", "allow_notifications") {
                 model.requestNotificationPermission()
             }
-            if (state.notificationStatus == "차단됨") SettingsButton("iPhone 알림 설정 열기", "notification_settings") { model.openNotificationSettings() }
+            if (state.notificationStatus == "차단됨") SettingsButton("Android 알림 설정 열기", "notification_settings") { model.openNotificationSettings() }
         }
-        Text("같은 공간에서는 Wi-Fi와 백그라운드 Bluetooth를 함께 사용해요. 앱을 강제로 종료하면 iOS가 Bluetooth 수신을 다시 시작하지 않으므로 앱을 한 번 열어 주세요. 데모 모드에서는 상대 기기 없이 호출이 이 기기로 되돌아와요.",
+        Text("같은 공간에서는 Bluetooth로 가까운 가족 기기와 연결해요. Android가 앱을 중지하거나 기기를 재시작한 뒤에는 앱을 한 번 열어 주세요. 데모 모드에서는 상대 기기 없이 호출이 이 기기로 되돌아와요.",
             fontSize = 12.sp, color = Secondary, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
         Spacer(Modifier.height(18.dp))
         Text("원격 호출", fontSize = 13.sp, color = Secondary, modifier = Modifier.padding(start = 16.dp, bottom = 6.dp))
         SettingsSection(null) {
-            SettingsValue("알림/APNs", state.pushStatus)
+            SettingsValue("알림/FCM", state.pushStatus)
             if (state.pushStatus == "요청하지 않음") SettingsButton("원격 알림 켜기", "enable_remote_notifications") {
                 model.enableRemoteNotifications()
             }
             SettingsValue("서버", state.serverStatus, if (state.serverStatus.startsWith("구성되지")) Orange else Secondary)
         }
-        Text("NAS 버튼 서버와 APNs가 연결되면 앱이 화면에 없거나 멀리 있어도 호출 알림을 받아요. 음성은 iOS가 앱을 실행할 수 있는 상태에서 바로 재생돼요.",
+        Text("Android 원격 알림 제공자가 연결되기 전에는 멀리 있는 기기로 서버 호출을 받을 수 없어요. 현재는 가까운 기기의 Bluetooth 호출과 서버 발신을 사용할 수 있어요.",
             fontSize = 12.sp, color = Secondary, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
     }
     if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false },

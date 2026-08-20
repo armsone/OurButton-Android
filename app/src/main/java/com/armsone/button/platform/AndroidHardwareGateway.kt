@@ -44,7 +44,7 @@ import java.util.UUID
 /** Connects the Compose state machine to Android hardware and the iOS-compatible transports. */
 class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardwareGateway {
     var onIncoming: (IncomingUi) -> Unit = {}
-    var onAcknowledge: (String) -> Unit = {}
+    var onAcknowledge: (String, String?) -> Unit = { _, _ -> }
     var onTransportStatus: (TransportUiStatus, Int) -> Unit = { _, _ -> }
     var onPresence: (String, String, AppRole?) -> Unit = { _, _, _ -> }
 
@@ -78,6 +78,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     private val notificationPermissionLauncher = activity.registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
+        prefs.edit().putBoolean("notificationAsked", true).apply()
         pendingNotificationStatus?.invoke(if (granted) "허용됨" else "차단됨")
         pendingNotificationStatus = null
     }
@@ -187,20 +188,27 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         sound.stop()
     }
 
-    override fun send(kind: IncomingKind, voice: ByteArray?, onError: (String) -> Unit) {
+    override fun send(
+        kind: IncomingKind,
+        voice: ByteArray?,
+        targetID: String?,
+        onError: (String) -> Unit,
+    ): String? {
         val callKind = when (kind) {
             IncomingKind.QUIET_ALERT -> CallEvent.Kind.QuietAlert
             IncomingKind.DING_DONG -> CallEvent.Kind.DingDong
             IncomingKind.VOICE_MESSAGE -> CallEvent.Kind.VoiceMessage
         }
-        val event = runCatching { makeEvent(callKind, voice) }.getOrElse {
+        val event = runCatching {
+            makeEvent(callKind, voice, targetID?.let(UUID::fromString))
+        }.getOrElse {
             onError("전송에 실패했어요. (${it.message ?: "알 수 없는 오류"})")
-            return
+            return null
         }
         val ble = runCatching { transport.send(event) }
         if (!backendConfiguration.isConfigured) {
             if (ble.isFailure) onError(ble.exceptionOrNull()?.message ?: "전송에 실패했어요.")
-            return
+            return event.id.toString()
         }
         scope.launch {
             val remote = runCatching { backend.send(event, activeSpace?.secret.orEmpty()) }
@@ -210,11 +218,15 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                 }
             }
         }
+        return event.id.toString()
     }
 
-    override fun acknowledge(eventId: String) {
+    override fun acknowledge(eventId: String, targetID: String?) {
         val original = runCatching { UUID.fromString(eventId) }.getOrNull() ?: return
-        val event = runCatching { makeEvent(CallEvent.Kind.Acknowledge).also { it.ackFor = original } }.getOrNull()
+        val target = targetID?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val event = runCatching {
+            makeEvent(CallEvent.Kind.Acknowledge, targetID = target).also { it.ackFor = original }
+        }.getOrNull()
             ?: return
         runCatching { transport.send(event) }
         if (backendConfiguration.isConfigured) scope.launch {
@@ -232,6 +244,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             return
         }
         pendingNotificationStatus = onStatus
+        prefs.edit().putBoolean("notificationAsked", true).apply()
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
@@ -240,7 +253,10 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             activity,
             Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
-    ) "허용됨" else "허용 필요"
+    ) "허용됨" else if (prefs.getBoolean("notificationAsked", false)) "차단됨" else "허용 필요"
+
+    override fun serverStatus(): String =
+        backendConfiguration.baseUrl?.takeIf { it.isNotBlank() } ?: "구성되지 않음 (오프라인)"
 
     override fun onForeground() = notifications.clearDeliveredCalls()
 
@@ -291,8 +307,15 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             null -> null
         }
         activity.runOnUiThread { onPresence(memberID, event.senderName, memberRole) }
+
+        // 대상이 아닌 기기도 징검다리 역할은 유지하고, 사용자 알림 효과만 건너뛴다.
+        if (event.kind != CallEvent.Kind.VoiceMessage) runCatching { transport.send(event) }
+        if (event.targetID != null && event.targetID != deviceID) return
+
         when (event.kind) {
-            CallEvent.Kind.Acknowledge -> activity.runOnUiThread { onAcknowledge(event.senderName) }
+            CallEvent.Kind.Acknowledge -> activity.runOnUiThread {
+                onAcknowledge(event.senderName, event.ackFor?.toString())
+            }
             CallEvent.Kind.Presence -> Unit
             CallEvent.Kind.QuietAlert, CallEvent.Kind.DingDong, CallEvent.Kind.VoiceMessage -> {
                 flash.flash()
@@ -308,6 +331,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                     val incoming = IncomingUi(
                         id = event.id.toString(),
                         senderName = event.senderName,
+                        senderID = event.senderID?.toString(),
                         kind = when (event.kind) {
                             CallEvent.Kind.QuietAlert -> IncomingKind.QUIET_ALERT
                             CallEvent.Kind.DingDong -> IncomingKind.DING_DONG
@@ -327,7 +351,11 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         }
     }
 
-    private fun makeEvent(kind: CallEvent.Kind, voice: ByteArray? = null): CallEvent {
+    private fun makeEvent(
+        kind: CallEvent.Kind,
+        voice: ByteArray? = null,
+        targetID: UUID? = null,
+    ): CallEvent {
         val space = activeSpace ?: throw IllegalStateException("먼저 가족 공간에 참여해 주세요.")
         return CallEvent(
             kind = kind,
@@ -339,6 +367,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                 AppRole.CHILD -> FamilyRole.Child
                 null -> null
             },
+            targetID = targetID,
             voiceData = voice,
         )
     }
