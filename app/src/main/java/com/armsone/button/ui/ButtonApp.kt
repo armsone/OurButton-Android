@@ -34,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -73,6 +74,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowCircleDown
+import androidx.compose.material.icons.filled.ArrowCircleUp
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PlayCircle
+import com.armsone.button.data.CallHistoryEntry
+import com.armsone.button.model.CallEvent
 import com.armsone.button.state.AppPhase
 import com.armsone.button.state.AppRole
 import com.armsone.button.state.AppRoute
@@ -90,6 +103,10 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 private val Accent = Color(0xFF4B76A3)
 private val Grouped = Color(0xFFF2F2F7)
@@ -365,16 +382,16 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
             Modifier.weight(1f), { model.showVoice(true) })
     }
     Spacer(Modifier.height(18.dp))
-    PresenceCard(state.members, state.selectedTargetID, model::toggleRecipient)
-    Spacer(Modifier.height(18.dp))
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TransportBadge(state)
-        if (state.isDemoMode) Text("데모 모드: 보낸 호출이 이 기기로 다시 전달돼요.", fontSize = 12.sp, color = Purple)
-    }
+    PresenceCard(state, model::toggleRecipient)
     state.callActivity?.let {
         Spacer(Modifier.height(18.dp))
         CallActivityBanner(it, model::clearCallActivity)
+    }
+    Spacer(Modifier.height(18.dp))
+    CallHistoryList(state.callHistory, model::replayVoice)
+    if (state.isDemoMode) {
+        Spacer(Modifier.height(18.dp))
+        Text("데모 모드: 보낸 호출이 이 기기로 다시 전달돼요.", fontSize = 12.sp, color = Purple)
     }
 }
 
@@ -388,24 +405,13 @@ private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveCo
             Modifier.weight(1f), model::sendDingDong)
     }
     Spacer(Modifier.height(18.dp))
-    PresenceCard(state.members, state.selectedTargetID, model::toggleRecipient)
-    Spacer(Modifier.height(18.dp))
-    Box(Modifier.align(Alignment.CenterHorizontally)) { TransportBadge(state) }
+    PresenceCard(state, model::toggleRecipient)
     state.callActivity?.let {
         Spacer(Modifier.height(18.dp))
         CallActivityBanner(it, model::clearCallActivity)
     }
     Spacer(Modifier.height(18.dp))
-    Column(Modifier.fillMaxWidth().shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black.copy(.05f),
-        spotColor = Color.Black.copy(.05f)).background(Color.White, RoundedCornerShape(24.dp)).padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        BellGlyph(64.dp, Accent)
-        Spacer(Modifier.height(16.dp))
-        Text("기다리는 중이에요", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(10.dp))
-        Text("가족이 부르면 화면에 표시돼요. “띵동 알림”은 소리와 함께,\n“조용히 알림”은 소리 없이 와요. 가까이 있으면 화면을 닫아도 블루투스로 받을 수 있어요.",
-            fontSize = 13.sp, color = Secondary, textAlign = TextAlign.Center, lineHeight = 17.sp)
-    }
+    CallHistoryList(state.callHistory, model::replayVoice)
     if (state.isDemoMode) {
         Spacer(Modifier.height(16.dp))
         Text("데모 모드: 보낸 호출이 이 기기로 돌아와요.", fontSize = 12.sp, color = Purple,
@@ -438,46 +444,91 @@ private fun HomeAction(
 
 @Composable
 private fun PresenceCard(
-    members: List<PresenceUi>,
-    selectedID: String?,
+    state: AppUiState,
     onSelect: (PresenceUi) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp))
         .border(1.dp, Secondary.copy(.15f), RoundedCornerShape(18.dp)).padding(14.dp).testTag("presence_list"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("♟  우리 공간", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text("${members.size}명", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Secondary)
+            Icon(Icons.Default.Groups, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("우리 공간", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            CompactTransportStatus(state)
+            Spacer(Modifier.width(8.dp))
+            Text("${state.members.size}명", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Secondary)
         }
-        members.forEach { member ->
-            val selected = selectedID == member.id
-            Row(Modifier.fillMaxWidth()
-                .clickable(enabled = !member.isCurrentDevice) { onSelect(member) }
-                .semantics {
-                    contentDescription = if (member.isCurrentDevice) {
-                        "${member.name}, 현재 기기"
-                    } else {
-                        "${member.name}, 이 사람에게만 보내려면 선택하세요"
-                    }
-                }, verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (member.role == AppRole.PARENT) "♙" else "☺", color = if (member.isCurrentDevice) Accent else Green,
-                    fontSize = 19.sp, textAlign = TextAlign.Center, modifier = Modifier.width(22.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(member.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    val role = if (member.role == AppRole.PARENT) "부모" else if (member.role == AppRole.CHILD) "자녀" else "가족"
-                    Text(if (member.isCurrentDevice) "이 기기 · $role" else "징검다리 연결 · $role", fontSize = 11.sp, color = Secondary)
+        state.members.chunked(2).forEach { rowMembers ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowMembers.forEach { member ->
+                    PresenceTile(member, state.selectedTargetID == member.id, onSelect, Modifier.weight(1f))
                 }
-                if (selected) {
-                    Text("✓", color = Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Box(Modifier.size(8.dp).background(if (member.isCurrentDevice) Accent else Green, CircleShape))
-                }
+                if (rowMembers.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        Text(if (selectedID == null) "선택하지 않으면 모두에게 보내요." else "선택한 한 사람에게만 보내요.",
+        Text(if (state.selectedTargetID == null) "선택하지 않으면 모두에게 보내요." else "선택한 한 사람에게만 보내요.",
             fontSize = 11.sp, color = Secondary)
     }
+}
+
+@Composable
+private fun PresenceTile(
+    member: PresenceUi,
+    selected: Boolean,
+    onSelect: (PresenceUi) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier.heightIn(min = 48.dp).background(Grouped, RoundedCornerShape(12.dp))
+        .clickable(enabled = !member.isCurrentDevice) { onSelect(member) }
+        .padding(horizontal = 10.dp, vertical = 7.dp)
+        .semantics {
+            contentDescription = if (member.isCurrentDevice) {
+                "${member.name}, 현재 기기"
+            } else {
+                "${member.name}, 이 사람에게만 보내려면 선택하세요"
+            }
+        }, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(
+            if (member.role == AppRole.PARENT) Icons.Default.Person else Icons.Default.PhoneAndroid,
+            contentDescription = null,
+            tint = if (member.isCurrentDevice) Accent else Green,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(member.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            val role = if (member.role == AppRole.PARENT) "부모" else if (member.role == AppRole.CHILD) "자녀" else "가족"
+            Text(if (member.isCurrentDevice) "이 기기 · $role" else "연결됨 · $role",
+                fontSize = 11.sp, color = Secondary, maxLines = 1)
+        }
+        if (selected) {
+            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
+        } else {
+            Box(Modifier.size(7.dp).background(if (member.isCurrentDevice) Accent else Green, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun CompactTransportStatus(state: AppUiState) {
+    val (text, color) = when (state.transportStatus) {
+        TransportUiStatus.IDLE -> "대기" to Secondary
+        TransportUiStatus.SEARCHING -> "연결 중" to Orange
+        TransportUiStatus.CONNECTED -> "${state.connectedCount}대 연결" to Green
+        TransportUiStatus.DEMO -> "데모" to Purple
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = Modifier.semantics { contentDescription = transportDescription(state) }) {
+        Box(Modifier.size(6.dp).background(color, CircleShape))
+        Text(text, fontSize = 11.sp, color = Secondary)
+    }
+}
+
+private fun transportDescription(state: AppUiState): String = when (state.transportStatus) {
+    TransportUiStatus.IDLE -> "꺼짐"
+    TransportUiStatus.SEARCHING -> "가족 기기를 찾는 중…"
+    TransportUiStatus.CONNECTED -> "근처 기기 ${state.connectedCount}대와 연결됨"
+    TransportUiStatus.DEMO -> "데모 모드"
 }
 
 @Composable
@@ -493,17 +544,78 @@ private fun CallActivityBanner(activity: CallActivityUi, dismiss: () -> Unit) {
 }
 
 @Composable
-private fun TransportBadge(state: AppUiState) {
-    val (glyph, text, color) = when (state.transportStatus) {
-        TransportUiStatus.IDLE -> Triple("☾", "꺼짐", Secondary)
-        TransportUiStatus.SEARCHING -> Triple("⌁", "가족 기기를 찾는 중…", Orange)
-        TransportUiStatus.CONNECTED -> Triple("✓", "근처 기기 ${state.connectedCount}대와 연결됨", Green)
-        TransportUiStatus.DEMO -> Triple("✦", "데모 모드", Purple)
+private fun CallHistoryList(entries: List<CallHistoryEntry>, onReplayVoice: (CallHistoryEntry) -> Unit) {
+    Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp))
+        .border(1.dp, Secondary.copy(.15f), RoundedCornerShape(18.dp)).padding(14.dp)
+        .testTag("call_history"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(20.dp))
+            Text("최근 기록", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (entries.isEmpty()) {
+            Text("아직 호출 기록이 없어요.", fontSize = 15.sp, color = Secondary,
+                modifier = Modifier.fillMaxWidth())
+        } else {
+            entries.take(20).forEachIndexed { index, entry ->
+                CallHistoryRow(entry, onReplayVoice)
+                if (index != entries.take(20).lastIndex) HorizontalDivider(color = Secondary.copy(.18f))
+            }
+        }
     }
-    Text("$glyph  $text", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = color,
-        modifier = Modifier.background(color.copy(.12f), CircleShape).padding(horizontal = 12.dp, vertical = 6.dp)
-            .testTag("transport_status"))
 }
+
+@Composable
+private fun CallHistoryRow(entry: CallHistoryEntry, onReplayVoice: (CallHistoryEntry) -> Unit) {
+    val color = when {
+        entry.kind == CallEvent.Kind.VoiceMessage -> Orange
+        entry.kind == CallEvent.Kind.DingDong -> Accent
+        else -> Secondary
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(
+            when {
+                entry.kind == CallEvent.Kind.VoiceMessage -> Icons.Default.GraphicEq
+                entry.direction == CallHistoryEntry.Direction.SENT -> Icons.Default.ArrowCircleUp
+                else -> Icons.Default.ArrowCircleDown
+            },
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(24.dp),
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            val destination = if (entry.counterpartName == "모두") "모두에게" else "${entry.counterpartName}님에게"
+            Text(
+                if (entry.direction == CallHistoryEntry.Direction.SENT) {
+                    "$destination ${entry.kind.title}을 보냈어요."
+                } else {
+                    "${entry.counterpartName}님의 ${entry.kind.title}이 왔어요."
+                },
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(CALL_HISTORY_DATE_FORMATTER.format(entry.date), fontSize = 11.sp, color = Secondary)
+            if (entry.acknowledgedBy.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Green, modifier = Modifier.size(13.dp))
+                    Text("확인: ${entry.acknowledgedBy.joinToString(", ")}", fontSize = 11.sp, color = Green)
+                }
+            }
+        }
+        if (entry.hasReplayableVoice) {
+            Icon(Icons.Default.PlayCircle,
+                contentDescription = "${entry.counterpartName} 음성 다시 듣기",
+                tint = Orange,
+                modifier = Modifier.size(28.dp).clickable { onReplayVoice(entry) }
+                    .testTag("replay_voice_${entry.id}"))
+        }
+    }
+}
+
+private val CALL_HISTORY_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter
+    .ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+    .withLocale(Locale.getDefault())
+    .withZone(ZoneId.systemDefault())
 
 @Composable
 private fun InviteDialog(invite: InviteUi?, model: AppViewModel) {
@@ -682,7 +794,7 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
             }
             SettingsValue("서버", state.serverStatus, if (state.serverStatus.startsWith("구성되지")) Orange else Secondary)
         }
-        Text("Android 원격 알림 제공자가 연결되기 전에는 멀리 있는 기기로 서버 호출을 받을 수 없어요. 현재는 가까운 기기의 Bluetooth 호출과 서버 발신을 사용할 수 있어요.",
+        Text("FCM을 켜면 같은 가족 공간의 원격 호출을 NAS 서버에서 안전하게 받아요. iPhone은 APNs, Android는 FCM을 사용하며 둘 다 같은 호출 기록과 대상 선택을 공유해요.",
             fontSize = 12.sp, color = Secondary, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
     }
     if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false },

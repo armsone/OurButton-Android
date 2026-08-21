@@ -20,6 +20,7 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
+        android:name=".ButtonApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="버튼"
@@ -29,6 +30,31 @@
         <meta-data
             android:name="ButtonBackendURL"
             android:value="https://hanstree.synology.me:7443/" />
+        <meta-data
+            android:name="ButtonFirebaseApplicationId"
+            android:value="${buttonFirebaseApplicationId}" />
+        <meta-data
+            android:name="ButtonFirebaseProjectId"
+            android:value="${buttonFirebaseProjectId}" />
+        <meta-data
+            android:name="ButtonFirebaseApiKey"
+            android:value="${buttonFirebaseApiKey}" />
+        <meta-data
+            android:name="ButtonFirebaseSenderId"
+            android:value="${buttonFirebaseSenderId}" />
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_messaging_installation_id_enabled"
+            android:value="true" />
+        <service
+            android:name=".push.ButtonFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"

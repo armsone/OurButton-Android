@@ -5,8 +5,8 @@
   "referenceRoot": "a local checkout of the sibling iOS source repository",
   "status": "Android source/runtime catalog verified; full paired visual parity unverified because iOS fixtures are absent",
   "verification": {
-    "iosUnitTests": "28 passed",
-    "androidGradle": "testDebugUnitTest, assembleDebug, and assembleRelease passed for versionCode 13",
+    "iosUnitTests": "34 passed, including 5 latest call-history tests",
+    "androidGradle": "28 testDebugUnitTest tests and assembleDebug passed for the latest source; debug APK installed and cold-started on SM-T500",
     "androidCatalogs": [
       {
         "count": 32,
@@ -63,6 +63,7 @@
     {"id":"parent_targeted","source":"Views/Parent/ParentHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual/Functional","status":"android-runtime"},
     {"id":"parent_sent","source":"Views/Parent/ParentHomeView.swift; ViewModels/AppModel.swift","class":"Visual/Functional","status":"android-runtime"},
     {"id":"parent_ack","source":"Views/Parent/ParentHomeView.swift","class":"Visual/Functional","status":"source-only"},
+    {"id":"parent_history","source":"Views/Parent/ParentHomeView.swift; Views/Shared/UIComponents.swift; Models/CallHistory.swift","class":"Visual/Content/state/Functional","status":"implemented-from-source; recapture-required"},
     {"id":"parent_quiet_tap","source":"Views/Parent/ParentHomeView.swift; ViewModels/AppModel.swift","class":"Functional","status":"source-only"},
     {"id":"parent_quiet_hold","source":"Views/Parent/ParentHomeView.swift; Services/DingDongPlayer.swift","class":"Functional","status":"source-only"},
     {"id":"parent_ding_tap","source":"Views/Parent/ParentHomeView.swift; Services/DingDongPlayer.swift","class":"Functional","status":"source-only"},
@@ -73,6 +74,7 @@
     {"id":"child_targeted","source":"Views/Child/ChildHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual/Functional","status":"android-runtime"},
     {"id":"child_sent","source":"Views/Child/ChildHomeView.swift; ViewModels/AppModel.swift","class":"Visual/Functional","status":"android-runtime"},
     {"id":"child_ack","source":"Views/Child/ChildHomeView.swift; ViewModels/AppModel.swift","class":"Visual/Functional","status":"android-runtime"},
+    {"id":"child_history","source":"Views/Child/ChildHomeView.swift; Views/Shared/UIComponents.swift; Models/CallHistory.swift","class":"Visual/Content/state/Functional","status":"implemented-from-source; recapture-required"},
     {"id":"incoming_quiet","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
     {"id":"incoming_ding","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},
     {"id":"incoming_voice","source":"Views/Child/IncomingCallView.swift","class":"Visual/Functional","status":"source-only"},

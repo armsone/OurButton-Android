@@ -13,10 +13,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import com.armsone.button.R
 import com.armsone.button.data.BackendConfiguration
+import com.armsone.button.data.CallHistoryStore
 import com.armsone.button.data.HttpBackendClient
 import com.armsone.button.model.CallEvent
 import com.armsone.button.model.FamilyRole
 import com.armsone.button.model.FamilySpace
+import com.armsone.button.push.DeviceIdentity
+import com.armsone.button.push.FirebasePushTokenProvider
+import com.armsone.button.push.PushMembership
+import com.armsone.button.push.PushRegistrationManager
+import com.armsone.button.push.RemoteEventRouter
 import com.armsone.button.state.AppHardwareGateway
 import com.armsone.button.state.AppPhase
 import com.armsone.button.state.AppRole
@@ -41,6 +47,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Connects the Compose state machine to Android hardware and the iOS-compatible transports. */
 class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardwareGateway {
@@ -62,9 +69,9 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     private val backendConfiguration = BackendConfiguration.load(activity)
     private val backend = HttpBackendClient(backendConfiguration)
     private val prefs = activity.getSharedPreferences("button_hardware", Context.MODE_PRIVATE)
-    private val deviceID: UUID = prefs.getString("deviceID", null)?.let {
-        runCatching { UUID.fromString(it) }.getOrNull()
-    } ?: UUID.randomUUID().also { prefs.edit().putString("deviceID", it.toString()).apply() }
+    private val deviceID: UUID = DeviceIdentity.loadOrCreate(activity)
+    private val pushTokens = FirebasePushTokenProvider(activity)
+    private val pushRegistration = PushRegistrationManager(activity, backend, pushTokens)
 
     private var activeSpace: FamilySpace? = null
     private var activeName = ""
@@ -107,6 +114,16 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     }
 
     init {
+        RemoteEventRouter.attach(this) { event ->
+            if (activeSpace?.id != event.spaceID ||
+                !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            ) {
+                false
+            } else {
+                activity.runOnUiThread { accept(event, relayOverBluetooth = false) }
+                true
+            }
+        }
         transport.onStatusChange = { status ->
             val mapped = when (status) {
                 TransportStatus.Idle -> TransportUiStatus.IDLE to 0
@@ -137,6 +154,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
 
     fun sync(state: AppUiState) {
         if (state.fixtureId != null || state.phase != AppPhase.HOME || state.invite == null || state.isDemoMode) {
+            pushRegistration.clearMembership()
             stopActiveTransport()
             return
         }
@@ -144,10 +162,19 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         activeRole = state.role
         val invite = state.invite
         val key = "${invite.spaceId}|${invite.secret}"
-        if (key == activeKey) return
         val space = runCatching {
             FamilySpace(UUID.fromString(invite.spaceId), invite.spaceName, invite.secret)
         }.getOrNull() ?: return
+        val role = when (state.role) {
+            AppRole.PARENT -> FamilyRole.Parent
+            AppRole.CHILD -> FamilyRole.Child
+            null -> return
+        }
+        pushRegistration.updateMembership(
+            PushMembership(space, deviceID, activeName, role),
+        )
+        scope.launch { pushRegistration.registerCurrentTokenIfAvailable() }
+        if (key == activeKey) return
         activeKey = key
         activeSpace = space
         ensureBluetoothPermissions()
@@ -197,7 +224,8 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         voice: ByteArray?,
         targetID: String?,
         onError: (String) -> Unit,
-    ): String? {
+        onSent: (String) -> Unit,
+    ) {
         val callKind = when (kind) {
             IncomingKind.QUIET_ALERT -> CallEvent.Kind.QuietAlert
             IncomingKind.DING_DONG -> CallEvent.Kind.DingDong
@@ -207,22 +235,31 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             makeEvent(callKind, voice, targetID?.let(UUID::fromString))
         }.getOrElse {
             onError("전송에 실패했어요. (${it.message ?: "알 수 없는 오류"})")
-            return null
+            return
+        }
+        val reported = AtomicBoolean(false)
+        fun reportSent() {
+            if (reported.compareAndSet(false, true)) {
+                activity.runOnUiThread { onSent(event.id.toString()) }
+            }
         }
         val ble = runCatching { transport.send(event) }
         if (!backendConfiguration.isConfigured) {
-            if (ble.isFailure) onError(ble.exceptionOrNull()?.message ?: "전송에 실패했어요.")
-            return event.id.toString()
+            if (ble.isSuccess) reportSent()
+            else onError(ble.exceptionOrNull()?.message ?: "전송에 실패했어요.")
+            return
         }
+        if (ble.isSuccess) reportSent()
         scope.launch {
             val remote = runCatching { backend.send(event, activeSpace?.secret.orEmpty()) }
-            if (ble.isFailure && remote.isFailure) {
+            if (remote.isSuccess) {
+                reportSent()
+            } else if (ble.isFailure) {
                 activity.runOnUiThread {
                     onError(remote.exceptionOrNull()?.message ?: ble.exceptionOrNull()?.message ?: "전송에 실패했어요.")
                 }
             }
         }
-        return event.id.toString()
     }
 
     override fun acknowledge(eventId: String, targetID: String?) {
@@ -259,13 +296,25 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         ) == PackageManager.PERMISSION_GRANTED
     ) "허용됨" else if (prefs.getBoolean("notificationAsked", false)) "차단됨" else "허용 필요"
 
+    override fun pushStatus(): String = pushRegistration.statusDescription()
+
     override fun serverStatus(): String =
         backendConfiguration.baseUrl?.takeIf { it.isNotBlank() } ?: "구성되지 않음 (오프라인)"
 
     override fun onForeground() = notifications.clearDeliveredCalls()
 
     override fun enableRemoteNotifications(onStatus: (String) -> Unit) {
-        onStatus("APNs 등록 실패: Android push 제공자가 연결되지 않음")
+        scope.launch {
+            val result = pushRegistration.requestTokenAndRegister()
+            activity.runOnUiThread {
+                onStatus(
+                    result.fold(
+                        onSuccess = { "FCM 등록 요청됨" },
+                        onFailure = { "FCM 등록 실패: ${it.message ?: "알 수 없는 오류"}" },
+                    ),
+                )
+            }
+        }
     }
 
     override fun openNotificationSettings() {
@@ -288,6 +337,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     }
 
     fun close() {
+        RemoteEventRouter.detach(this)
         stopActiveTransport()
         voiceRecorder.reset()
         voicePlayer.stop()
@@ -296,7 +346,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         scope.cancel()
     }
 
-    private fun accept(event: CallEvent) {
+    private fun accept(event: CallEvent, relayOverBluetooth: Boolean = true) {
         val space = activeSpace ?: return
         if (event.spaceID != space.id || event.senderID == deviceID) return
         val now = Instant.now()
@@ -313,8 +363,17 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         activity.runOnUiThread { onPresence(memberID, event.senderName, memberRole) }
 
         // 대상이 아닌 기기도 징검다리 역할은 유지하고, 사용자 알림 효과만 건너뛴다.
-        if (event.kind != CallEvent.Kind.VoiceMessage) runCatching { transport.send(event) }
+        if (relayOverBluetooth && event.kind != CallEvent.Kind.VoiceMessage) {
+            runCatching { transport.send(event) }
+        }
         if (event.targetID != null && event.targetID != deviceID) return
+
+        if (event.kind == CallEvent.Kind.QuietAlert ||
+            event.kind == CallEvent.Kind.DingDong ||
+            event.kind == CallEvent.Kind.VoiceMessage
+        ) {
+            CallHistoryStore(activity.applicationContext).recordReceived(event)
+        }
 
         when (event.kind) {
             CallEvent.Kind.Acknowledge -> activity.runOnUiThread {
@@ -341,6 +400,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                             CallEvent.Kind.DingDong -> IncomingKind.DING_DONG
                             else -> IncomingKind.VOICE_MESSAGE
                         },
+                        sentAt = event.sentAt,
                         timeLabel = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
                             .withLocale(Locale.getDefault())
                             .withZone(ZoneId.systemDefault())

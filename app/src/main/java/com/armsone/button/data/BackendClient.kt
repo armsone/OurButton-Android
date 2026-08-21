@@ -50,19 +50,17 @@ interface BackendClient {
     suspend fun fetchEvent(id: UUID, space: FamilySpace): CallEvent
 }
 
-/** The backend accepts tokens supplied by a push implementation; this module does not bind Firebase. */
+/** Boundary kept separate from Firebase so registration and backend behavior remain testable. */
 interface PushTokenProvider {
     val statusDescription: String
-    suspend fun requestToken(): Result<String>
-    suspend fun refreshTokenIfAuthorized(): Result<String>?
+    suspend fun requestRegistration(): Result<Unit>
 }
 
 class NoPushTokenProvider : PushTokenProvider {
     override val statusDescription = "원격 알림 제공자가 연결되지 않음"
-    override suspend fun requestToken() = Result.failure<String>(
+    override suspend fun requestRegistration() = Result.failure<Unit>(
         IllegalStateException(statusDescription),
     )
-    override suspend fun refreshTokenIfAuthorized(): Result<String>? = null
 }
 
 class HttpBackendClient(private val configuration: BackendConfiguration) : BackendClient {

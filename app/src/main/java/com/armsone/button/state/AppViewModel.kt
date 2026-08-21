@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.armsone.button.data.CallHistoryEntry
+import com.armsone.button.data.CallHistoryStore
+import com.armsone.button.model.CallEvent
 import com.armsone.button.model.FamilySpace
 import com.armsone.button.model.QRInvite
 import kotlinx.coroutines.Job
@@ -14,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.time.Instant
 import java.util.UUID
 
 enum class AppPhase { SETUP, ROLE_SELECTION, HOME }
@@ -43,6 +47,7 @@ data class IncomingUi(
     val senderName: String,
     val senderID: String? = null,
     val kind: IncomingKind,
+    val sentAt: Instant = Instant.now(),
     val timeLabel: String = "오후 3:00",
     val voiceData: ByteArray? = null,
     val hasVoice: Boolean = kind == IncomingKind.VOICE_MESSAGE,
@@ -66,6 +71,7 @@ data class AppUiState(
     val incoming: IncomingUi? = null,
     val selectedTargetID: String? = null,
     val callActivity: CallActivityUi? = null,
+    val callHistory: List<CallHistoryEntry> = emptyList(),
     val errorMessage: String? = null,
     val quietHoldTriggered: Boolean = false,
     val notificationStatus: String = "허용 필요",
@@ -92,7 +98,8 @@ interface AppHardwareGateway {
         voice: ByteArray? = null,
         targetID: String? = null,
         onError: (String) -> Unit = {},
-    ): String? = null
+        onSent: (String) -> Unit = {},
+    ) = Unit
     fun acknowledge(eventId: String, targetID: String? = null) = Unit
     fun requestNotificationPermission(onStatus: (String) -> Unit) = Unit
     fun enableRemoteNotifications(onStatus: (String) -> Unit) = Unit
@@ -100,6 +107,7 @@ interface AppHardwareGateway {
     fun openMicrophoneSettings() = Unit
     fun share(text: String) = Unit
     fun notificationStatus(): String = "허용 필요"
+    fun pushStatus(): String = "요청하지 않음"
     fun serverStatus(): String = "구성되지 않음 (오프라인)"
     fun onForeground() = Unit
 }
@@ -109,6 +117,7 @@ object NoOpHardwareGateway : AppHardwareGateway
 class AppViewModel(
     application: Application,
     private var hardware: AppHardwareGateway,
+    private val historyStore: CallHistoryStore = CallHistoryStore(application),
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, NoOpHardwareGateway)
     private val prefs = application.getSharedPreferences("button_state", Context.MODE_PRIVATE)
@@ -135,10 +144,12 @@ class AppViewModel(
         if (name.isEmpty() || member.isEmpty()) return
         val space = FamilySpace(name = name)
         val invite = InviteUi(space.id.toString(), space.name, space.secret)
+        clearHistoryIfSpaceChanged(invite.spaceId)
         _uiState.update {
             it.copy(phase = AppPhase.ROLE_SELECTION, route = AppRoute.WELCOME,
                 spaceName = name, displayName = member, invite = invite,
-                transportStatus = TransportUiStatus.SEARCHING)
+                transportStatus = TransportUiStatus.SEARCHING,
+                callHistory = historyFor(invite.spaceId))
         }
         persist()
     }
@@ -151,9 +162,11 @@ class AppViewModel(
     fun join(invite: InviteUi, memberName: String) {
         val member = prefixCodePoints(memberName.trim(), 20)
         if (member.isEmpty()) return
+        clearHistoryIfSpaceChanged(invite.spaceId)
         _uiState.update { it.copy(phase = AppPhase.ROLE_SELECTION, route = AppRoute.WELCOME,
             spaceName = invite.spaceName, displayName = member, invite = invite,
-            transportStatus = TransportUiStatus.SEARCHING) }
+            transportStatus = TransportUiStatus.SEARCHING,
+            callHistory = historyFor(invite.spaceId)) }
         persist()
     }
 
@@ -237,11 +250,29 @@ class AppViewModel(
 
     fun presentIncoming(event: IncomingUi) {
         incomingDismissJob?.cancel()
+        recordIncoming(event)
         _uiState.update { it.copy(incoming = event) }
         incomingDismissJob = viewModelScope.launch {
             delay(3_000)
             dismissIncoming()
         }
+    }
+
+    /** Records a delivered call without presenting foreground UI (for background push/BLE delivery). */
+    fun recordIncoming(event: IncomingUi) {
+        val spaceID = currentSpaceID()
+        val eventID = runCatching { UUID.fromString(event.id) }.getOrNull()
+        if (spaceID != null && eventID != null) {
+            historyStore.recordReceived(
+                id = eventID,
+                spaceID = spaceID,
+                kind = event.kind.toCallKind(),
+                senderName = event.senderName,
+                date = event.sentAt,
+                voiceData = event.voiceData,
+            )
+        }
+        _uiState.update { it.copy(callHistory = historyForCurrentSpace()) }
     }
 
     fun dismissIncoming() {
@@ -280,12 +311,14 @@ class AppViewModel(
         cancelTransientWork()
         memberExpiryJobs.values.forEach(Job::cancel)
         memberExpiryJobs.clear()
+        historyStore.clear()
         prefs.edit().clear().apply()
         _uiState.value = AppUiState()
     }
 
     fun playDingDong() = hardware.playDingDong()
     fun playVoice() = _uiState.value.incoming?.voiceData?.let(hardware::playVoice)
+    fun replayVoice(entry: CallHistoryEntry) = historyStore.voiceData(entry)?.let(hardware::playVoice)
     fun startQrScanner(onCode: (String) -> Unit) = hardware.startQrScanner(onCode)
     fun stopQrScanner() = hardware.stopQrScanner()
     fun shareInvite() = _uiState.value.invite?.let { hardware.share(it.url) }
@@ -306,12 +339,15 @@ class AppViewModel(
     fun presentAcknowledge(senderName: String, ackFor: String?) {
         val originalID = ackFor ?: return
         pruneSentCallIDs()
-        if (!sentCallIDs.containsKey(originalID)) return
+        val wasRecorded = runCatching { UUID.fromString(originalID) }.getOrNull()
+            ?.let { historyStore.markAcknowledged(it, senderName) }
+            ?: false
+        if (!sentCallIDs.containsKey(originalID) && !wasRecorded) return
         _uiState.update {
             it.copy(callActivity = CallActivityUi(
                 CallActivityKind.ACKNOWLEDGED,
                 "${senderName}님이 호출을 확인했어요.",
-            ))
+            ), callHistory = historyForCurrentSpace())
         }
     }
 
@@ -349,7 +385,9 @@ class AppViewModel(
         _uiState.update {
             it.copy(
                 notificationStatus = hardware.notificationStatus(),
+                pushStatus = hardware.pushStatus(),
                 serverStatus = hardware.serverStatus(),
+                callHistory = historyForCurrentSpace(),
             )
         }
     }
@@ -386,6 +424,8 @@ class AppViewModel(
                 callActivity = CallActivityUi(CallActivityKind.SENT, "첫째님에게 띵동 호출을 보냈어요."))
             "parent_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째님이 호출을 확인했어요."))
+            "parent_home_history" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                callHistory = fixtureHistory())
             "parent_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 isDemoMode = true, transportStatus = TransportUiStatus.DEMO)
             "parent_home_idle" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
@@ -399,6 +439,8 @@ class AppViewModel(
                 callActivity = CallActivityUi(CallActivityKind.SENT, "모두에게 조용한 호출을 보냈어요."))
             "child_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째님이 호출을 확인했어요."))
+            "child_home_history" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
+                callHistory = fixtureHistory())
             "child_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 isDemoMode = true, transportStatus = TransportUiStatus.DEMO)
             "invite_qr" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showInvite = true)
@@ -435,6 +477,26 @@ class AppViewModel(
             ))
     }
 
+    private fun fixtureHistory(): List<CallHistoryEntry> = listOf(
+        CallHistoryEntry(
+            id = UUID.fromString("11111111-1111-1111-1111-111111111111"),
+            spaceID = UUID.fromString("12345678-1234-1234-1234-123456789abc"),
+            kind = CallEvent.Kind.DingDong,
+            direction = CallHistoryEntry.Direction.SENT,
+            counterpartName = "첫째",
+            date = Instant.parse("2026-08-21T06:00:00Z"),
+            acknowledgedBy = listOf("첫째"),
+        ),
+        CallHistoryEntry(
+            id = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            spaceID = UUID.fromString("12345678-1234-1234-1234-123456789abc"),
+            kind = CallEvent.Kind.QuietAlert,
+            direction = CallHistoryEntry.Direction.RECEIVED,
+            counterpartName = "첫째",
+            date = Instant.parse("2026-08-21T05:55:00Z"),
+        ),
+    )
+
     private fun loadState(): AppUiState = runCatching {
         val json = JSONObject(prefs.getString("state", null) ?: return AppUiState())
         val spaceName = json.optString("spaceName")
@@ -446,7 +508,8 @@ class AppViewModel(
             role = role, spaceName = spaceName, displayName = displayName, invite = invite,
             isDemoMode = json.optBoolean("demo"),
             transportStatus = if (json.optBoolean("demo")) TransportUiStatus.DEMO else TransportUiStatus.SEARCHING,
-            members = if (role == null) emptyList() else listOf(PresenceUi("current", displayName, role, true)))
+            members = if (role == null) emptyList() else listOf(PresenceUi("current", displayName, role, true)),
+            callHistory = historyFor(invite.spaceId))
     }.getOrElse { AppUiState() }
 
     private fun persist() {
@@ -480,29 +543,75 @@ class AppViewModel(
     private fun sendCall(kind: IncomingKind, voice: ByteArray? = null) {
         val state = _uiState.value
         val target = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
-        val eventID = if (state.isDemoMode) {
-            UUID.randomUUID().toString().also { id ->
-                if (target == null) demoEcho(id, kind, voice)
-            }
+        if (state.isDemoMode) {
+            val eventID = UUID.randomUUID().toString()
+            if (target == null) demoEcho(eventID, kind, voice)
+            recordSentCall(eventID, kind, voice, target)
         } else {
-            hardware.send(kind, voice, target?.id) { showError(it) }
+            hardware.send(
+                kind = kind,
+                voice = voice,
+                targetID = target?.id,
+                onError = ::showError,
+                onSent = { eventID -> recordSentCall(eventID, kind, voice, target) },
+            )
         }
-        if (eventID != null) {
-            pruneSentCallIDs()
-            sentCallIDs[eventID] = System.currentTimeMillis()
-            val destination = target?.name?.let { "${it}님에게" } ?: "모두에게"
-            val title = when (kind) {
-                IncomingKind.QUIET_ALERT -> "조용한 호출"
-                IncomingKind.DING_DONG -> "띵동 호출"
-                IncomingKind.VOICE_MESSAGE -> "음성 메시지"
-            }
-            _uiState.update {
-                it.copy(callActivity = CallActivityUi(
-                    CallActivityKind.SENT,
-                    "$destination $title\uC744 \uBCF4\uB0C8\uC5B4\uC694.",
-                ))
-            }
+    }
+
+    private fun recordSentCall(
+        eventID: String,
+        kind: IncomingKind,
+        voice: ByteArray?,
+        target: PresenceUi?,
+    ) {
+        val parsedID = runCatching { UUID.fromString(eventID) }.getOrNull() ?: return
+        pruneSentCallIDs()
+        sentCallIDs[eventID] = System.currentTimeMillis()
+        val destination = target?.name?.let { "${it}님에게" } ?: "모두에게"
+        val title = when (kind) {
+            IncomingKind.QUIET_ALERT -> "조용한 호출"
+            IncomingKind.DING_DONG -> "띵동 호출"
+            IncomingKind.VOICE_MESSAGE -> "음성 메시지"
         }
+        currentSpaceID()?.let { spaceID ->
+            historyStore.recordSent(
+                id = parsedID,
+                spaceID = spaceID,
+                kind = kind.toCallKind(),
+                targetName = target?.name,
+                date = Instant.now(),
+                voiceData = voice,
+            )
+        }
+        _uiState.update {
+            it.copy(callActivity = CallActivityUi(
+                CallActivityKind.SENT,
+                "$destination $title\uC744 \uBCF4\uB0C8\uC5B4\uC694.",
+            ), callHistory = historyForCurrentSpace())
+        }
+    }
+
+    private fun IncomingKind.toCallKind(): CallEvent.Kind = when (this) {
+        IncomingKind.QUIET_ALERT -> CallEvent.Kind.QuietAlert
+        IncomingKind.DING_DONG -> CallEvent.Kind.DingDong
+        IncomingKind.VOICE_MESSAGE -> CallEvent.Kind.VoiceMessage
+    }
+
+    private fun currentSpaceID(): UUID? = _uiState.value.invite?.spaceId
+        ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+
+    private fun historyForCurrentSpace(): List<CallHistoryEntry> = currentSpaceID()?.let { spaceID ->
+        historyStore.entries.filter { it.spaceID == spaceID }
+    }.orEmpty()
+
+    private fun historyFor(spaceID: String): List<CallHistoryEntry> = runCatching { UUID.fromString(spaceID) }
+        .getOrNull()
+        ?.let { parsed -> historyStore.entries.filter { it.spaceID == parsed } }
+        .orEmpty()
+
+    private fun clearHistoryIfSpaceChanged(nextSpaceID: String) {
+        val currentSpaceID = _uiState.value.invite?.spaceId ?: return
+        if (currentSpaceID != nextSpaceID) historyStore.clear()
     }
 
     private fun pruneSentCallIDs() {

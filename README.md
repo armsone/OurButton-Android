@@ -1,6 +1,6 @@
 # 버튼 Android
 
-Android phone/tablet counterpart to the iOS `버튼` family-call app. It includes the Compose UI/state catalog, iOS-compatible QR/JSON/BLE codecs, real BLE central/peripheral transport, audio/torch/recording/notification integrations, HTTP fallback, and 2×2 parent/child widgets. Full visual parity is not claimed because the iOS project has no deterministic state fixture catalog for paired capture.
+Android phone/tablet counterpart to the iOS `버튼` family-call app. It includes the Compose UI/state catalog, iOS-compatible QR/JSON/BLE codecs, real BLE central/peripheral transport, audio/torch/recording/notification integrations, APNs-parallel FCM receiving through the shared HTTP backend, and 2×2 parent/child widgets. Full visual parity is not claimed because the iOS project has no deterministic state fixture catalog for paired capture.
 
 ## Build and test
 
@@ -22,7 +22,9 @@ Build 13 also matches the latest iOS one-recipient calling contract: `targetID` 
 
 - Manifest permissions: `INTERNET`, `RECORD_AUDIO`, `CAMERA`, `FLASHLIGHT`, `POST_NOTIFICATIONS` (API 33+), `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, and `BLUETOOTH_ADVERTISE` (API 31+), with legacy Bluetooth/location declarations scoped to their applicable older APIs.
 - Declare BLE feature support as optional unless product policy intentionally excludes unsupported devices.
-- A concrete Android push provider is not present in the supplied iOS repository. `PushTokenProvider` therefore remains an explicit boundary; BLE and configured HTTP sending work, but process-absent remote receiving needs FCM credentials/server support.
+- FCM uses data-only messages (`eventID`, `spaceID`, `kind`). Android performs an authenticated event fetch, then validates the fetched space, kind and optional `targetID` before showing anything. Firebase's current installation-ID registration callbacks and WorkManager handle cold/background delivery and token re-registration; automatic registration stays off until the user enables remote notifications.
+- Firebase identifiers are intentionally not committed. Put these values from the Android app registration for package `com.armsone.button` in user/CI Gradle properties: `BUTTON_FIREBASE_APPLICATION_ID`, `BUTTON_FIREBASE_PROJECT_ID`, `BUTTON_FIREBASE_API_KEY`, and `BUTTON_FIREBASE_SENDER_ID`. When they are absent, the app still builds and its Bluetooth/server-sending behavior remains available, while the UI reports that Firebase setup is needed.
+- The NAS/server needs its own Firebase service-account credential and FCM HTTP v1 configuration. Never put that service-account JSON in this public Android repository; client identifiers and the server service-account serve different purposes.
 - Foreground ding-dong audio is synthesized to the iOS frequencies/timing. The versioned notification channel uses the original iOS `dingdong3.wav` bundled as `res/raw/dingdong3`.
 - Background BLE is **not guaranteed**. Current BLE work is lifecycle-safe foreground best effort. Process death, force-stop, Doze, OEM restrictions and Android background-start rules can stop scanning/advertising. A foreground service would require a persistent user-visible notification plus service declarations/types and should be added only as an explicit product decision.
 

@@ -3,7 +3,9 @@ package com.armsone.button.platform
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.net.Uri
@@ -13,12 +15,14 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.armsone.button.model.CallEvent
 import com.armsone.button.R
+import com.armsone.button.MainActivity
 
-/** Posts the two app-owned call notifications with intentionally separate channels. */
+/** Posts app-owned call notifications with intentionally separate sound-policy channels. */
 class NotificationHelper(private val context: Context, dingDongSound: Uri? = null) {
     companion object {
         const val QUIET_CHANNEL_ID = "family_calls_quiet_v1"
         const val DING_DONG_CHANNEL_ID = "family_calls_ding_dong_v2"
+        const val VOICE_CHANNEL_ID = "family_calls_voice_v1"
         private const val CHANNEL_GROUP_ID = "family_calls"
         private const val NOTIFICATION_TAG = "family-call"
     }
@@ -62,13 +66,25 @@ class NotificationHelper(private val context: Context, dingDongSound: Uri? = nul
             }
             enableVibration(false)
         }
+        val voice = NotificationChannel(
+            VOICE_CHANNEL_ID,
+            "음성 메시지",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            group = CHANNEL_GROUP_ID
+            description = "가족의 음성 메시지가 도착하면 알려요."
+            enableVibration(false)
+        }
         // Android channel sound/importance is immutable after first creation. New behavior
         // therefore requires a new versioned channel ID, never mutation of these channels.
-        manager.createNotificationChannels(listOf(quiet, dingDong))
+        manager.createNotificationChannels(listOf(quiet, dingDong, voice))
     }
 
     fun notify(event: CallEvent): Boolean {
-        if (event.kind != CallEvent.Kind.QuietAlert && event.kind != CallEvent.Kind.DingDong) {
+        if (event.kind != CallEvent.Kind.QuietAlert &&
+            event.kind != CallEvent.Kind.DingDong &&
+            event.kind != CallEvent.Kind.VoiceMessage
+        ) {
             return false
         }
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -77,18 +93,36 @@ class NotificationHelper(private val context: Context, dingDongSound: Uri? = nul
         ) return false
 
         val dingDong = event.kind == CallEvent.Kind.DingDong
+        val voice = event.kind == CallEvent.Kind.VoiceMessage
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            event.id.hashCode(),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notification = NotificationCompat.Builder(
             context,
-            if (dingDong) DING_DONG_CHANNEL_ID else QUIET_CHANNEL_ID,
+            when {
+                dingDong -> DING_DONG_CHANNEL_ID
+                voice -> VOICE_CHANNEL_ID
+                else -> QUIET_CHANNEL_ID
+            },
         )
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("버튼")
-            .setSubText(if (dingDong) "띵동 알림" else "조용히 알림")
-            .setContentText("${event.senderName}님이 불렀어요.")
+            .setSubText(when {
+                dingDong -> "띵동 알림"
+                voice -> "음성 메시지"
+                else -> "조용히 알림"
+            })
+            .setContentText(if (voice) "${event.senderName}님의 음성 메시지가 도착했어요." else "${event.senderName}님이 불렀어요.")
+            .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            .setSilent(!dingDong)
+            .setSilent(!dingDong && !voice)
             .setGroup("family-call-${event.spaceID}")
             .build()
 
