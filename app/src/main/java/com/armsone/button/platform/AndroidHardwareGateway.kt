@@ -309,7 +309,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             activity.runOnUiThread {
                 onStatus(
                     result.fold(
-                        onSuccess = { "FCM 등록 요청됨" },
+                        onSuccess = { pushRegistration.statusDescription() },
                         onFailure = { "FCM 등록 실패: ${it.message ?: "알 수 없는 오류"}" },
                     ),
                 )

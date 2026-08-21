@@ -71,6 +71,7 @@ class FirebasePushTokenProvider(private val context: Context) : PushTokenProvide
     override suspend fun requestRegistration(): Result<Unit> {
         configuration.ensureApp(context)
             ?: return Result.failure(IllegalStateException(statusDescription))
+        if (!PushStore(context).token.isNullOrBlank()) return Result.success(Unit)
         return suspendCancellableCoroutine { continuation ->
             FirebaseMessaging.getInstance().register().addOnCompleteListener { task ->
                 if (!continuation.isActive) return@addOnCompleteListener
