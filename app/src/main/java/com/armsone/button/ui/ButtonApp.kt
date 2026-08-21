@@ -63,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -144,7 +145,7 @@ fun ButtonApp(model: AppViewModel) {
                 }
             }
             if (state.showInvite) InviteDialog(state.invite, model)
-            if (state.showVoice) VoiceDialog(state.voiceState, model)
+            if (state.showVoice) VoiceDialog(state.voiceState, state.sendCooldownRemainingSeconds, model)
             state.incoming?.let { IncomingDialog(it, model) }
             state.errorMessage?.let { GlobalErrorDialog(it, model) }
         }
@@ -375,11 +376,12 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         HomeAction("조용히 알림", "◌", Secondary, "quiet_alert",
             hint = "소리 없이 알림 화면만 상대 기기에 보여요", modifier = Modifier.weight(1f),
+            cooldownSeconds = state.sendCooldownRemainingSeconds,
             onTap = model::sendQuietTap, onPressStart = model::beginQuietHold, onPressEnd = model::endQuietHold)
         HomeAction("띵동 알림", "●", Accent, "dingdong", "띵동 소리와 함께 알림 화면을 상대 기기에 보여요",
-            Modifier.weight(1f), model::sendDingDong)
+            Modifier.weight(1f), state.sendCooldownRemainingSeconds, model::sendDingDong)
         HomeAction("목소리 전달", "♩", Orange, "voice", "누르고 있는 동안 최대 15초 녹음해 손을 떼면 전송돼요",
-            Modifier.weight(1f), { model.showVoice(true) })
+            Modifier.weight(1f), state.sendCooldownRemainingSeconds, { model.showVoice(true) })
     }
     Spacer(Modifier.height(18.dp))
     PresenceCard(state, model::toggleRecipient)
@@ -399,10 +401,11 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
 private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveContent("child_home") {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         HomeAction("조용히 알림", "◌", Secondary, "quiet_alert",
-            "소리 없이 부모와 가족에게 호출을 보내요", Modifier.weight(1f), model::sendQuietTap,
+            "소리 없이 부모와 가족에게 호출을 보내요", Modifier.weight(1f),
+            state.sendCooldownRemainingSeconds, model::sendQuietTap,
             model::beginQuietHold, model::endQuietHold)
         HomeAction("띵동 알림", "●", Accent, "dingdong", "띵동 소리와 함께 부모와 가족에게 호출을 보내요",
-            Modifier.weight(1f), model::sendDingDong)
+            Modifier.weight(1f), state.sendCooldownRemainingSeconds, model::sendDingDong)
     }
     Spacer(Modifier.height(18.dp))
     PresenceCard(state, model::toggleRecipient)
@@ -425,20 +428,34 @@ private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveCo
 @Composable
 private fun HomeAction(
     title: String, glyph: String, color: Color, tag: String, hint: String, modifier: Modifier = Modifier,
+    cooldownSeconds: Int = 0,
     onTap: () -> Unit, onPressStart: (() -> Unit)? = null, onPressEnd: (() -> Unit)? = null,
 ) {
-    val gesture = if (onPressStart != null) Modifier.pointerInput(Unit) {
-        detectTapGestures(onTap = { onTap() }, onPress = {
-            onPressStart(); tryAwaitRelease(); onPressEnd?.invoke()
-        })
-    } else Modifier.clickable(onClick = onTap)
+    val enabled = cooldownSeconds <= 0
+    val gesture = when {
+        !enabled -> Modifier
+        onPressStart != null -> Modifier.pointerInput(Unit) {
+            detectTapGestures(onTap = { onTap() }, onPress = {
+                onPressStart(); tryAwaitRelease(); onPressEnd?.invoke()
+            })
+        }
+        else -> Modifier.clickable(onClick = onTap)
+    }
     Column(modifier.heightIn(min = 78.dp).background(Color.White, RoundedCornerShape(16.dp))
         .border(1.dp, color.copy(.25f), RoundedCornerShape(16.dp)).then(gesture).testTag(tag)
-        .semantics { contentDescription = title; onClick(label = hint) { onTap(); true } }.padding(horizontal = 4.dp),
+        .semantics {
+            contentDescription = if (enabled) title else "$title, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
+            if (enabled) onClick(label = hint) { onTap(); true } else disabled()
+        }.padding(horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(glyph, color = color, fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
+        Text(glyph, color = if (enabled) color else color.copy(.35f), fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(7.dp))
-        Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            color = if (enabled) Color.Unspecified else Secondary)
+        if (!enabled) {
+            Spacer(Modifier.height(2.dp))
+            Text("${cooldownSeconds}초 뒤 가능", fontSize = 10.sp, color = Secondary, maxLines = 1)
+        }
     }
 }
 
@@ -666,19 +683,29 @@ private fun QrPlaceholder(value: String) {
 }
 
 @Composable
-private fun VoiceDialog(state: VoiceState, model: AppViewModel) {
+private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewModel) {
     Dialog(onDismissRequest = { model.showVoice(false) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         SheetFrame("목소리 전달", "닫기", { model.showVoice(false) }, "voice_sheet") {
             Text("버튼을 누르고 있는 동안 녹음되고,\n손을 떼면 바로 전송돼요.", fontSize = 17.sp, color = Secondary,
                 textAlign = TextAlign.Center, modifier = Modifier.padding(top = 24.dp))
             Spacer(Modifier.height(28.dp))
-            val color = when (state) { VoiceState.RECORDING -> Red; VoiceState.DENIED -> Color.Gray; else -> Accent }
+            val coolingDown = cooldownSeconds > 0 && state != VoiceState.RECORDING
+            val color = when {
+                state == VoiceState.RECORDING -> Red
+                state == VoiceState.DENIED || coolingDown -> Color.Gray
+                else -> Accent
+            }
             Box(Modifier.requiredSize(160.dp).background(color.copy(.15f), CircleShape)
-                .pointerInput(state) { detectTapGestures(onPress = {
+                .pointerInput(state, coolingDown) { if (!coolingDown) detectTapGestures(onPress = {
                     model.beginVoiceHold(); tryAwaitRelease(); model.endVoiceHold()
                 }) }.testTag("voice_hold").semantics {
-                    contentDescription = "목소리 전달 버튼"
-                    onClick(label = "1초 동안 녹음하고 전송") { model.recordAccessibleVoice(); true }
+                    if (coolingDown) {
+                        contentDescription = "목소리 전달 버튼, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
+                        disabled()
+                    } else {
+                        contentDescription = "목소리 전달 버튼"
+                        onClick(label = "1초 동안 녹음하고 전송") { model.recordAccessibleVoice(); true }
+                    }
                 }, contentAlignment = Alignment.Center) {
                 Box(Modifier.requiredSize(110.dp).background(color, CircleShape), contentAlignment = Alignment.Center) {
                     Text(if (state == VoiceState.RECORDING) "≋" else if (state == VoiceState.DENIED) "∅" else "♩",
@@ -686,14 +713,15 @@ private fun VoiceDialog(state: VoiceState, model: AppViewModel) {
                 }
             }
             Spacer(Modifier.height(28.dp))
-            when (state) {
-                VoiceState.DENIED -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            when {
+                state == VoiceState.DENIED -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("마이크 접근이 꺼져 있어요.", fontSize = 13.sp, color = Red)
                     Button(onClick = model::openMicrophoneSettings) { Text("마이크 설정 열기") }
                 }
-                VoiceState.REQUESTING_PERMISSION -> Text("마이크 권한을 확인하는 중…", fontSize = 13.sp, color = Secondary)
-                VoiceState.RECORDING -> Text("녹음 중… 손을 떼면 전송돼요.", fontSize = 13.sp, color = Red)
-                VoiceState.SENT -> Text("✓  전송했어요", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Green)
+                state == VoiceState.REQUESTING_PERMISSION -> Text("마이크 권한을 확인하는 중…", fontSize = 13.sp, color = Secondary)
+                state == VoiceState.RECORDING -> Text("녹음 중… 손을 떼면 전송돼요.", fontSize = 13.sp, color = Red)
+                state == VoiceState.SENT -> Text("✓  전송했어요", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Green)
+                coolingDown -> Text("${cooldownSeconds}초 뒤에 다시 보낼 수 있어요.", fontSize = 13.sp, color = Secondary)
                 else -> Text("버튼을 누르고 있으면 녹음이 시작돼요. (최대 15초)", fontSize = 13.sp, color = Secondary)
             }
             Spacer(Modifier.weight(1f))

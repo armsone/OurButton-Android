@@ -74,6 +74,7 @@ data class AppUiState(
     val callHistory: List<CallHistoryEntry> = emptyList(),
     val errorMessage: String? = null,
     val quietHoldTriggered: Boolean = false,
+    val sendCooldownRemainingSeconds: Int = 0,
     val notificationStatus: String = "허용 필요",
     val pushStatus: String = "요청하지 않음",
     val serverStatus: String = "구성되지 않음 (오프라인)",
@@ -124,6 +125,8 @@ class AppViewModel(
     private val _uiState = MutableStateFlow(loadState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
+    private val sendCooldown = SendCooldown()
+    private var cooldownJob: Job? = null
     private var quietHoldJob: Job? = null
     private var incomingDismissJob: Job? = null
     private var voiceLimitJob: Job? = null
@@ -179,7 +182,10 @@ class AppViewModel(
     }
 
     fun showInvite(show: Boolean) = _uiState.update { it.copy(showInvite = show) }
-    fun showVoice(show: Boolean) = _uiState.update { it.copy(showVoice = show, voiceState = VoiceState.IDLE) }
+    fun showVoice(show: Boolean) {
+        if (show && sendCooldown.isActive) return
+        _uiState.update { it.copy(showVoice = show, voiceState = VoiceState.IDLE) }
+    }
     fun clearCallActivity() = _uiState.update { it.copy(callActivity = null) }
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
@@ -214,6 +220,7 @@ class AppViewModel(
 
     fun beginVoiceHold() {
         if (_uiState.value.voiceState == VoiceState.DENIED) return
+        if (sendCooldown.isActive) return
         hardware.beginVoiceRecording(15, { state ->
             _uiState.update { it.copy(voiceState = state) }
         }) { data -> finishVoice(data) }
@@ -309,6 +316,9 @@ class AppViewModel(
 
     fun leaveSpace() {
         cancelTransientWork()
+        cooldownJob?.cancel()
+        cooldownJob = null
+        sendCooldown.reset()
         memberExpiryJobs.values.forEach(Job::cancel)
         memberExpiryJobs.clear()
         historyStore.clear()
@@ -541,6 +551,11 @@ class AppViewModel(
     }
 
     private fun sendCall(kind: IncomingKind, voice: ByteArray? = null) {
+        if (!sendCooldown.beginIfAvailable()) {
+            showError("잠시만요. ${sendCooldown.remainingSeconds()}초 뒤에 다시 보낼 수 있어요.")
+            return
+        }
+        startCooldownUpdates()
         val state = _uiState.value
         val target = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
         if (state.isDemoMode) {
@@ -588,6 +603,18 @@ class AppViewModel(
                 CallActivityKind.SENT,
                 "$destination $title\uC744 \uBCF4\uB0C8\uC5B4\uC694.",
             ), callHistory = historyForCurrentSpace())
+        }
+    }
+
+    private fun startCooldownUpdates() {
+        cooldownJob?.cancel()
+        cooldownJob = viewModelScope.launch {
+            while (true) {
+                val remaining = sendCooldown.remainingSeconds()
+                _uiState.update { it.copy(sendCooldownRemainingSeconds = remaining) }
+                if (remaining <= 0) break
+                delay(250)
+            }
         }
     }
 
