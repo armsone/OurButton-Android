@@ -11,8 +11,8 @@ android {
         applicationId = "com.armsone.button"
         minSdk = 26
         targetSdk = 37
-        versionCode = 14
-        versionName = "1.1"
+        versionCode = 15
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -81,4 +81,27 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+}
+
+val verifyReleaseFirebaseConfiguration by tasks.registering {
+    doLast {
+        val requiredFirebaseProperties = listOf(
+            "BUTTON_FIREBASE_APPLICATION_ID",
+            "BUTTON_FIREBASE_PROJECT_ID",
+            "BUTTON_FIREBASE_API_KEY",
+            "BUTTON_FIREBASE_SENDER_ID",
+        )
+        val missing = requiredFirebaseProperties.filter {
+            providers.gradleProperty(it).orNull.isNullOrBlank()
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "Release builds require Firebase configuration: ${missing.joinToString()}",
+            )
+        }
+    }
+}
+
+tasks.matching { it.name == "processReleaseMainManifest" }.configureEach {
+    dependsOn(verifyReleaseFirebaseConfiguration)
 }
