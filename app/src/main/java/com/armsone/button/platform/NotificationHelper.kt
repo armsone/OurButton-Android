@@ -73,11 +73,11 @@ class NotificationHelper(
         }
         val voice = NotificationChannel(
             VOICE_CHANNEL_ID,
-            "소리",
+            "음성",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             group = CHANNEL_GROUP_ID
-            description = "가족이 보낸 소리가 도착하면 알려요."
+            description = "가족이 보낸 음성이 도착하면 알려요."
             enableVibration(false)
         }
         val siren = NotificationChannel(
@@ -141,11 +141,11 @@ class NotificationHelper(
             .setSubText(when {
                 siren -> "사이렌 알림"
                 dingDong -> "띵동"
-                voice -> "소리"
+                voice -> "음성"
                 else -> "톡톡"
             })
             .setContentText(when {
-                voice -> "${event.senderName}의 소리가 도착했어요."
+                voice -> "${event.senderName}의 음성이 도착했어요."
                 siren -> "${event.senderName}의 긴급 사이렌 호출이 왔어요."
                 else -> "${event.senderName}의 호출이 왔어요."
             })

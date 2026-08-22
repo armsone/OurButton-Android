@@ -784,7 +784,7 @@ class AppViewModel(
             IncomingKind.QUIET_ALERT -> "톡톡"
             IncomingKind.SIREN -> "사이렌 호출"
             IncomingKind.DING_DONG -> "띵동"
-            IncomingKind.VOICE_MESSAGE -> "소리"
+            IncomingKind.VOICE_MESSAGE -> "음성"
         }
         currentSpaceID()?.let { spaceID ->
             historyStore.recordSent(

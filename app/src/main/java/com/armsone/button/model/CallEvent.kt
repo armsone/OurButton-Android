@@ -26,12 +26,12 @@ class CallEvent(
         QuietAlert("quietAlert", "톡톡"),
         Siren("siren", "사이렌 호출"),
         DingDong("dingDong", "띵동"),
-        VoiceMessage("voiceMessage", "소리"),
+        VoiceMessage("voiceMessage", "음성"),
         Acknowledge("acknowledge", "확인"),
         Presence("presence", "연결 확인");
 
         val arrivalTitle: String
-            get() = "$title${if (this == VoiceMessage) "가" else "이"}"
+            get() = "${title}이"
 
         companion object {
             fun fromRawValue(value: String): Kind? = entries.firstOrNull { it.rawValue == value }

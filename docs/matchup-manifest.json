@@ -3,10 +3,10 @@
   "generatedAt": "2026-08-22",
   "referencePlatform": "ios",
   "referenceRoot": "a local checkout of the sibling iOS source repository",
-  "status": "Multiple rooms, 20-entry history, per-device pending counts, child sound sending, explicit confirmation, square two-character actions, and semantic icons are implemented on both platforms; paired post-change captures and live multi-device verification remain",
+  "status": "Multiple rooms, 20-entry history, per-device pending counts, child voice sending, explicit confirmation, large square two-character actions, and semantic icons are implemented on both platforms; Android parent_home was recaptured after enlargement, while paired iOS and live multi-device verification remain",
   "verification": {
-    "iosUnitTests": "Latest delta: 40 tests passed on the dedicated iPhone 17 simulator; generic simulator build also passed",
-    "androidGradle": "Latest delta: testDebugUnitTest and assembleDebug passed; no post-change device installation or paired capture was performed",
+    "iosUnitTests": "Latest delta: 40 tests passed on the dedicated iPhone 17 simulator; generic iOS Release build also passed",
+    "androidGradle": "Latest delta: testDebugUnitTest and assembleDebug passed; build 19 was installed on SM-F968N and parent_home was recaptured",
     "serverTests": "All 21 Node server tests passed",
     "androidCatalogs": [
       {
@@ -59,7 +59,7 @@
     {"id":"role_compact","source":"Views/Setup/RoleSelectionView.swift","class":"Visual/Functional","status":"source-only"},
     {"id":"role_regular","source":"Views/Setup/RoleSelectionView.swift","class":"Visual","status":"source-only"},
     {"id":"parent_idle","source":"Views/Parent/ParentHomeView.swift","class":"Visual/Content/state","status":"source-only"},
-    {"id":"home_action_icons","source":"Views/Parent/ParentHomeView.swift; Views/Child/ChildHomeView.swift","class":"Visual/Content/state","status":"implemented-from-source; square-actions-paired-recapture-required"},
+    {"id":"home_action_icons","source":"Views/Parent/ParentHomeView.swift; Views/Child/ChildHomeView.swift","class":"Visual/Content/state","status":"large-square-actions-android-runtime; paired-ios-recapture-required"},
     {"id":"parent_connected","source":"Views/Parent/ParentHomeView.swift","class":"Content/state","status":"source-only"},
     {"id":"parent_demo","source":"Views/Parent/ParentHomeView.swift","class":"Content/state","status":"source-only"},
     {"id":"parent_targeted","source":"Views/Parent/ParentHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual/Functional","status":"android-runtime"},

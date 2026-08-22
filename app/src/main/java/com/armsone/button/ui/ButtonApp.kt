@@ -412,7 +412,7 @@ private fun RoleCard(role: AppRole, color: Color, model: AppViewModel, modifier:
         Spacer(Modifier.height(10.dp))
         Text(if (parent) "부모" else "자녀", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(3.dp))
-        Text("소리와 호출을 주고받아요",
+        Text("음성과 호출을 주고받아요",
             fontSize = 12.sp, color = Secondary, textAlign = TextAlign.Center)
     }
 }
@@ -425,7 +425,7 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
         VoiceState.DENIED -> "마이크 설정 필요"
         VoiceState.READY -> "전송 확인"
         VoiceState.SENT -> "전송했어요"
-        VoiceState.IDLE -> "소리"
+        VoiceState.IDLE -> "음성"
     }
     val voiceIcon = when (state.voiceState) {
         VoiceState.RECORDING -> Icons.Default.GraphicEq
@@ -476,7 +476,7 @@ private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveCo
             model::beginQuietHold, model::endQuietHold)
         HomeAction("띵동", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 부모와 가족에게 호출을 보내요",
             Modifier.weight(1f), state.sendCooldownRemainingSeconds, model::sendDingDong)
-        HomeAction("소리", Icons.Default.Mic, Orange, "voice", "녹음한 소리를 보낼지 확인한 뒤 가족에게 보내요",
+        HomeAction("음성", Icons.Default.Mic, Orange, "voice", "녹음한 음성을 보낼지 확인한 뒤 가족에게 보내요",
             Modifier.weight(1f), state.sendCooldownRemainingSeconds, { model.showVoice(true) })
     }
     Spacer(Modifier.height(18.dp))
@@ -518,16 +518,16 @@ private fun HomeAction(
         }
         else -> Modifier.clickable(onClick = onTap)
     }
-    Column(modifier.heightIn(min = 78.dp).background(Color.White, RoundedCornerShape(16.dp))
+    Column(modifier.background(Color.White, RoundedCornerShape(16.dp))
         .aspectRatio(1f).border(1.dp, color.copy(.25f), RoundedCornerShape(16.dp)).then(gesture).testTag(tag)
         .semantics {
             contentDescription = if (enabled) title else "$title, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
             if (enabled) onClick(label = hint) { onTap(); true } else disabled()
-        }.padding(horizontal = 4.dp),
+        }.padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Icon(icon, contentDescription = null, tint = if (enabled) color else color.copy(.35f), modifier = Modifier.size(25.dp))
-        Spacer(Modifier.height(7.dp))
-        Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        Icon(icon, contentDescription = null, tint = if (enabled) color else color.copy(.35f), modifier = Modifier.size(32.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(title, fontSize = if (title.length > 4) 12.sp else 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
             color = if (enabled) Color.Unspecified else Secondary)
         if (!enabled) {
             Spacer(Modifier.height(2.dp))
@@ -777,7 +777,7 @@ private fun QrPlaceholder(value: String) {
 @Composable
 private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewModel) {
     Dialog(onDismissRequest = { model.showVoice(false) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        SheetFrame("소리", "닫기", { model.showVoice(false) }, "voice_sheet") {
+        SheetFrame("음성", "닫기", { model.showVoice(false) }, "voice_sheet") {
             Text("버튼을 누르고 있는 동안 녹음되고,\n손을 떼면 보낼지 확인해요.", fontSize = 17.sp, color = Secondary,
                 textAlign = TextAlign.Center, modifier = Modifier.padding(top = 24.dp))
             Spacer(Modifier.height(28.dp))
@@ -792,10 +792,10 @@ private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewM
                     model.beginVoiceHold(); tryAwaitRelease(); model.endVoiceHold()
                 }) }.testTag("voice_hold").semantics {
                     if (coolingDown) {
-                        contentDescription = "소리 버튼, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
+                        contentDescription = "음성 버튼, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
                         disabled()
                     } else {
-                        contentDescription = "소리 버튼"
+                        contentDescription = "음성 버튼"
                         onClick(label = "1초 동안 녹음하고 전송 여부 확인") { model.recordAccessibleVoice(); true }
                     }
                 }, contentAlignment = Alignment.Center) {
@@ -833,10 +833,10 @@ private fun VoiceConfirmationDialog(state: AppUiState, model: AppViewModel) {
     val recipient = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
     AlertDialog(
         onDismissRequest = model::discardVoice,
-        title = { Text("소리를 보낼까요?") },
+        title = { Text("음성을 보낼까요?") },
         text = {
-            Text(recipient?.let { "${it.name}에게 녹음한 소리를 보내요." }
-                ?: "모두에게 녹음한 소리를 보내요.")
+            Text(recipient?.let { "${it.name}에게 녹음한 음성을 보내요." }
+                ?: "모두에게 녹음한 음성을 보내요.")
         },
         confirmButton = { TextButton(onClick = model::confirmVoiceSend) { Text("보내기") } },
         dismissButton = { TextButton(onClick = model::discardVoice) { Text("취소") } },
@@ -882,7 +882,7 @@ private fun IncomingDialog(event: IncomingUi, model: AppViewModel) {
                         IncomingKind.QUIET_ALERT -> "톡톡"
                         IncomingKind.SIREN -> "사이렌 호출"
                         IncomingKind.DING_DONG -> "띵동"
-                        IncomingKind.VOICE_MESSAGE -> "소리"
+                        IncomingKind.VOICE_MESSAGE -> "음성"
                     }
                     Text("${event.senderName}의 $title", fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(8.dp))
@@ -890,7 +890,7 @@ private fun IncomingDialog(event: IncomingUi, model: AppViewModel) {
                     if (event.hasVoice) {
                         Spacer(Modifier.height(22.dp))
                         OutlinedButton(onClick = model::playVoice, modifier = Modifier.testTag("play_voice")) {
-                            Text("▶  소리 듣기", fontWeight = FontWeight.SemiBold)
+                            Text("▶  음성 듣기", fontWeight = FontWeight.SemiBold)
                         }
                     }
                     Spacer(Modifier.weight(1f))
