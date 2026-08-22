@@ -90,7 +90,7 @@ class PushDeliveryWorker(
             return Result.failure()
         }
         if (event.senderID == membership.deviceID) return Result.success()
-        if (event.targetID != null && event.targetID != membership.deviceID) return Result.success()
+        if (!event.isAddressedTo(membership.deviceID)) return Result.success()
         if (!DeliveryDeduplicator(applicationContext).markIfNew(event.id)) return Result.success()
         val history = CallHistoryStore(applicationContext)
         if (event.kind == CallEvent.Kind.Acknowledge) {

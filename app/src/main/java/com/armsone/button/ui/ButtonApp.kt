@@ -555,12 +555,12 @@ private fun PresenceCard(
         state.members.chunked(2).forEach { rowMembers ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowMembers.forEach { member ->
-                    PresenceTile(member, state.selectedTargetID == member.id, onSelect, Modifier.weight(1f))
+                    PresenceTile(member, member.id in state.selectedTargetIDs, onSelect, Modifier.weight(1f))
                 }
                 if (rowMembers.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        Text(if (state.selectedTargetID == null) "선택하지 않으면 모두에게 보내요." else "선택한 한 사람에게만 보내요.",
+        Text(if (state.selectedTargetIDs.isEmpty()) "선택하지 않으면 모두에게 보내요." else "선택한 사람들에게만 보내요.",
             fontSize = 11.sp, color = Secondary)
     }
 }
@@ -579,7 +579,7 @@ private fun PresenceTile(
             contentDescription = if (member.isCurrentDevice) {
                 "${member.name}, 현재 기기"
             } else {
-                "${member.name}, 이 사람에게만 보내려면 선택하세요"
+                "${member.name}, 함께 받을 사람으로 선택하거나 해제하세요"
             }
         }, verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -830,13 +830,15 @@ private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewM
 
 @Composable
 private fun VoiceConfirmationDialog(state: AppUiState, model: AppViewModel) {
-    val recipient = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
+    val recipientNames = state.members
+        .filter { it.id in state.selectedTargetIDs && !it.isCurrentDevice }
+        .joinToString(", ") { it.name }
     AlertDialog(
         onDismissRequest = model::discardVoice,
         title = { Text("음성을 보낼까요?") },
         text = {
-            Text(recipient?.let { "${it.name}에게 녹음한 음성을 보내요." }
-                ?: "모두에게 녹음한 음성을 보내요.")
+            Text(if (recipientNames.isEmpty()) "모두에게 녹음한 음성을 보내요."
+                else "${recipientNames}에게 녹음한 음성을 보내요.")
         },
         confirmButton = { TextButton(onClick = model::confirmVoiceSend) { Text("보내기") } },
         dismissButton = { TextButton(onClick = model::discardVoice) { Text("취소") } },

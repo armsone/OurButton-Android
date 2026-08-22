@@ -78,7 +78,7 @@ data class AppUiState(
     val showVoice: Boolean = false,
     val voiceState: VoiceState = VoiceState.IDLE,
     val incoming: IncomingUi? = null,
-    val selectedTargetID: String? = null,
+    val selectedTargetIDs: Set<String> = emptySet(),
     val callActivity: CallActivityUi? = null,
     val callHistory: List<CallHistoryEntry> = emptyList(),
     val errorMessage: String? = null,
@@ -107,7 +107,7 @@ interface AppHardwareGateway {
     fun send(
         kind: IncomingKind,
         voice: ByteArray? = null,
-        targetID: String? = null,
+        targetIDs: Set<String> = emptySet(),
         onError: (String) -> Unit = {},
         onSent: (String) -> Unit = {},
     ) = Unit
@@ -393,7 +393,7 @@ class AppViewModel(
                 displayName = room.displayName,
                 invite = room.invite,
                 members = own,
-                selectedTargetID = null,
+                selectedTargetIDs = emptySet(),
                 callHistory = historyFor(room.invite.spaceId),
                 transportStatus = if (it.isDemoMode) TransportUiStatus.DEMO else TransportUiStatus.SEARCHING,
             )
@@ -466,7 +466,11 @@ class AppViewModel(
     fun toggleRecipient(member: PresenceUi) {
         if (member.isCurrentDevice) return
         _uiState.update {
-            it.copy(selectedTargetID = if (it.selectedTargetID == member.id) null else member.id)
+            it.copy(selectedTargetIDs = if (member.id in it.selectedTargetIDs) {
+                it.selectedTargetIDs - member.id
+            } else {
+                it.selectedTargetIDs + member.id
+            })
         }
     }
 
@@ -487,8 +491,8 @@ class AppViewModel(
                 it.copy(
                     members = if (id in remoteMemberIDs) it.members
                         else it.members.filterNot { member -> member.id == id },
-                    selectedTargetID = it.selectedTargetID?.takeUnless { selected ->
-                        selected == id && id !in remoteMemberIDs
+                    selectedTargetIDs = it.selectedTargetIDs.filterTo(mutableSetOf()) { selected ->
+                        selected != id || id in remoteMemberIDs
                     },
                 )
             }
@@ -516,7 +520,7 @@ class AppViewModel(
                 .thenBy { it.name })
             state.copy(
                 members = visible,
-                selectedTargetID = state.selectedTargetID?.takeIf { selected ->
+                selectedTargetIDs = state.selectedTargetIDs.filterTo(mutableSetOf()) { selected ->
                     visible.any { it.id == selected && !it.isCurrentDevice }
                 },
             )
@@ -573,7 +577,7 @@ class AppViewModel(
             "role_selection" -> base.copy(phase = AppPhase.ROLE_SELECTION)
             "parent_home" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT)
             "parent_home_targeted" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
-                selectedTargetID = FIXTURE_CHILD_ID)
+                selectedTargetIDs = setOf(FIXTURE_CHILD_ID))
             "parent_home_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 callActivity = CallActivityUi(CallActivityKind.SENT, "첫째에게 띵동 호출을 보냈어요."))
             "parent_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
@@ -596,7 +600,7 @@ class AppViewModel(
                 quietHoldRemainingSeconds = 3)
             "child_home" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD)
             "child_home_targeted" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
-                selectedTargetID = FIXTURE_CHILD_ID)
+                selectedTargetIDs = setOf(FIXTURE_CHILD_ID))
             "child_home_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 callActivity = CallActivityUi(CallActivityKind.SENT, "모두에게 조용한 호출을 보냈어요."))
             "child_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
@@ -752,19 +756,19 @@ class AppViewModel(
             startCooldownUpdates()
         }
         val state = _uiState.value
-        val target = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
-        val intendedRecipientCount = if (target == null) state.members.count { !it.isCurrentDevice } else 1
+        val targets = state.members.filter { it.id in state.selectedTargetIDs && !it.isCurrentDevice }
+        val intendedRecipientCount = if (targets.isEmpty()) state.members.count { !it.isCurrentDevice } else targets.size
         if (state.isDemoMode) {
             val eventID = UUID.randomUUID().toString()
-            if (target == null) demoEcho(eventID, kind, voice)
-            recordSentCall(eventID, kind, voice, target, intendedRecipientCount)
+            if (targets.isEmpty()) demoEcho(eventID, kind, voice)
+            recordSentCall(eventID, kind, voice, targets, intendedRecipientCount)
         } else {
             hardware.send(
                 kind = kind,
                 voice = voice,
-                targetID = target?.id,
+                targetIDs = targets.mapTo(linkedSetOf()) { it.id },
                 onError = ::showError,
-                onSent = { eventID -> recordSentCall(eventID, kind, voice, target, intendedRecipientCount) },
+                onSent = { eventID -> recordSentCall(eventID, kind, voice, targets, intendedRecipientCount) },
             )
         }
     }
@@ -773,13 +777,14 @@ class AppViewModel(
         eventID: String,
         kind: IncomingKind,
         voice: ByteArray?,
-        target: PresenceUi?,
+        targets: List<PresenceUi>,
         intendedRecipientCount: Int,
     ) {
         val parsedID = runCatching { UUID.fromString(eventID) }.getOrNull() ?: return
         pruneSentCallIDs()
         sentCallIDs[eventID] = System.currentTimeMillis()
-        val destination = target?.name?.let { "${it}에게" } ?: "모두에게"
+        val targetName = targets.map { it.name }.takeIf { it.isNotEmpty() }?.joinToString(", ")
+        val destination = targetName?.let { "${it}에게" } ?: "모두에게"
         val title = when (kind) {
             IncomingKind.QUIET_ALERT -> "톡톡"
             IncomingKind.SIREN -> "사이렌 호출"
@@ -791,7 +796,7 @@ class AppViewModel(
                 id = parsedID,
                 spaceID = spaceID,
                 kind = kind.toCallKind(),
-                targetName = target?.name,
+                targetName = targetName,
                 date = Instant.now(),
                 voiceData = voice,
                 intendedRecipientCount = intendedRecipientCount,

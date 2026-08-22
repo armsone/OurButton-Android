@@ -242,7 +242,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     override fun send(
         kind: IncomingKind,
         voice: ByteArray?,
-        targetID: String?,
+        targetIDs: Set<String>,
         onError: (String) -> Unit,
         onSent: (String) -> Unit,
     ) {
@@ -253,7 +253,17 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             IncomingKind.VOICE_MESSAGE -> CallEvent.Kind.VoiceMessage
         }
         val event = runCatching {
-            makeEvent(callKind, voice, targetID?.let(UUID::fromString))
+            val targets = targetIDs.map(UUID::fromString)
+            makeEvent(
+                callKind,
+                voice,
+                targetID = when (targets.size) {
+                    0 -> null
+                    1 -> targets.first()
+                    else -> CallEvent.MULTI_TARGET_SENTINEL
+                },
+                targetIDs = targets.takeIf { it.size > 1 },
+            )
         }.getOrElse {
             onError("전송에 실패했어요. (${it.message ?: "알 수 없는 오류"})")
             return
@@ -390,7 +400,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         if (relayOverBluetooth && event.kind != CallEvent.Kind.VoiceMessage) {
             runCatching { transport.send(event) }
         }
-        if (event.targetID != null && event.targetID != deviceID) return
+        if (!event.isAddressedTo(deviceID)) return
 
         if (event.kind == CallEvent.Kind.QuietAlert ||
             event.kind == CallEvent.Kind.Siren ||
@@ -447,6 +457,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         kind: CallEvent.Kind,
         voice: ByteArray? = null,
         targetID: UUID? = null,
+        targetIDs: List<UUID>? = null,
     ): CallEvent {
         val space = activeSpace ?: throw IllegalStateException("먼저 가족 공간에 참여해 주세요.")
         return CallEvent(
@@ -460,6 +471,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                 null -> null
             },
             targetID = targetID,
+            targetIDs = targetIDs,
             voiceData = voice,
         )
     }

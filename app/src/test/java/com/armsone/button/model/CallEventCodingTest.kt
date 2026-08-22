@@ -90,6 +90,25 @@ class CallEventCodingTest {
     }
 
     @Test
+    fun multipleTargetsRoundTripWithoutChangingProtocolVersion() {
+        val targetIDs = listOf(UUID.randomUUID(), UUID.randomUUID())
+        val event = CallEvent(
+            kind = CallEvent.Kind.DingDong,
+            spaceID = spaceID,
+            senderName = "엄마",
+            targetID = CallEvent.MULTI_TARGET_SENTINEL,
+            targetIDs = targetIDs,
+        )
+        val decoded = CallEventCoder.decode(CallEventCoder.encode(event))
+
+        assertEquals(1, decoded.version)
+        assertEquals(CallEvent.MULTI_TARGET_SENTINEL, decoded.targetID)
+        assertEquals(targetIDs, decoded.targetIDs)
+        assertTrue(decoded.isAddressedTo(targetIDs[1]))
+        assertFalse(decoded.isAddressedTo(UUID.randomUUID()))
+    }
+
+    @Test
     fun invalidVoiceDataAndSenderFailToEncode() {
         val missing = CallEvent(CallEvent.Kind.VoiceMessage, spaceID = spaceID, senderName = "아빠")
         assertTrue(assertThrows(CallEventCodingError::class.java) {
