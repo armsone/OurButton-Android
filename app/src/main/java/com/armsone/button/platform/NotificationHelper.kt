@@ -45,7 +45,7 @@ class NotificationHelper(
 
         val quiet = NotificationChannel(
             QUIET_CHANNEL_ID,
-            "조용히 알림",
+            "톡톡",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             group = CHANNEL_GROUP_ID
@@ -55,7 +55,7 @@ class NotificationHelper(
         }
         val dingDong = NotificationChannel(
             DING_DONG_CHANNEL_ID,
-            "띵동 알림",
+            "띵동",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             group = CHANNEL_GROUP_ID
@@ -73,11 +73,11 @@ class NotificationHelper(
         }
         val voice = NotificationChannel(
             VOICE_CHANNEL_ID,
-            "음성 메시지",
+            "소리",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             group = CHANNEL_GROUP_ID
-            description = "가족의 음성 메시지가 도착하면 알려요."
+            description = "가족이 보낸 소리가 도착하면 알려요."
             enableVibration(false)
         }
         val siren = NotificationChannel(
@@ -140,14 +140,14 @@ class NotificationHelper(
             .setContentTitle("버튼")
             .setSubText(when {
                 siren -> "사이렌 알림"
-                dingDong -> "띵동 알림"
-                voice -> "음성 메시지"
-                else -> "조용히 알림"
+                dingDong -> "띵동"
+                voice -> "소리"
+                else -> "톡톡"
             })
             .setContentText(when {
-                voice -> "${event.senderName}님의 음성 메시지가 도착했어요."
-                siren -> "${event.senderName}님의 긴급 사이렌 호출이 왔어요."
-                else -> "${event.senderName}님이 불렀어요."
+                voice -> "${event.senderName}의 소리가 도착했어요."
+                siren -> "${event.senderName}의 긴급 사이렌 호출이 왔어요."
+                else -> "${event.senderName}의 호출이 왔어요."
             })
             .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_CALL)

@@ -23,7 +23,7 @@ private fun bindActions(context: Context, views: RemoteViews, child: Boolean) {
     views.setOnClickPendingIntent(R.id.widget_quiet, widgetIntent(context, "quiet", if (child) 11 else 1))
     views.setOnClickPendingIntent(R.id.widget_ding, widgetIntent(context, "ding", if (child) 12 else 2))
     views.setOnClickPendingIntent(R.id.widget_open, widgetIntent(context, "open", if (child) 14 else 4))
-    if (!child) views.setOnClickPendingIntent(R.id.widget_voice, widgetIntent(context, "voice", 3))
+    views.setOnClickPendingIntent(R.id.widget_voice, widgetIntent(context, "voice", if (child) 13 else 3))
 }
 
 class ParentButtonWidgetProvider : AppWidgetProvider() {

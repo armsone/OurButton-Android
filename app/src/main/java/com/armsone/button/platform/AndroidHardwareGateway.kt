@@ -30,6 +30,7 @@ import com.armsone.button.state.AppRole
 import com.armsone.button.state.AppUiState
 import com.armsone.button.state.IncomingKind
 import com.armsone.button.state.IncomingUi
+import com.armsone.button.state.PresenceUi
 import com.armsone.button.state.TransportUiStatus
 import com.armsone.button.state.VoiceState
 import com.armsone.button.transport.AndroidBleTransport
@@ -53,9 +54,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Connects the Compose state machine to Android hardware and the iOS-compatible transports. */
 class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardwareGateway {
     var onIncoming: (IncomingUi) -> Unit = {}
-    var onAcknowledge: (String, String?) -> Unit = { _, _ -> }
+    var onAcknowledge: (String, String?, String?) -> Unit = { _, _, _ -> }
     var onTransportStatus: (TransportUiStatus, Int) -> Unit = { _, _ -> }
     var onPresence: (String, String, AppRole?) -> Unit = { _, _, _ -> }
+    var onMembers: (List<PresenceUi>) -> Unit = {}
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val transport = AndroidBleTransport(activity)
@@ -156,8 +158,27 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     }
 
     fun sync(state: AppUiState) {
-        if (state.fixtureId != null || state.phase != AppPhase.HOME || state.invite == null || state.isDemoMode) {
-            pushRegistration.clearMembership()
+        if (state.fixtureId != null) {
+            stopActiveTransport()
+            return
+        }
+        val savedMemberships = state.rooms.mapNotNull { room ->
+            val roomRole = when (room.role) {
+                AppRole.PARENT -> FamilyRole.Parent
+                AppRole.CHILD -> FamilyRole.Child
+                null -> return@mapNotNull null
+            }
+            val roomSpace = runCatching {
+                FamilySpace(UUID.fromString(room.invite.spaceId), room.invite.spaceName, room.invite.secret)
+            }.getOrNull() ?: return@mapNotNull null
+            PushMembership(roomSpace, deviceID, room.displayName.ifBlank { "가족" }, roomRole)
+        }
+        if (savedMemberships.isEmpty()) pushRegistration.clearMembership()
+        else {
+            pushRegistration.updateMemberships(savedMemberships)
+            scope.launch { pushRegistration.registerCurrentTokenIfAvailable() }
+        }
+        if (state.phase != AppPhase.HOME || state.invite == null || state.isDemoMode) {
             stopActiveTransport()
             return
         }
@@ -168,26 +189,22 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         val space = runCatching {
             FamilySpace(UUID.fromString(invite.spaceId), invite.spaceName, invite.secret)
         }.getOrNull() ?: return
-        val role = when (state.role) {
-            AppRole.PARENT -> FamilyRole.Parent
-            AppRole.CHILD -> FamilyRole.Child
-            null -> return
-        }
-        pushRegistration.updateMembership(
-            PushMembership(space, deviceID, activeName, role),
-        )
-        scope.launch { pushRegistration.registerCurrentTokenIfAvailable() }
+        if (state.role == null) return
         if (key == activeKey) return
         activeKey = key
         activeSpace = space
+        refreshRemoteMembers(space)
         ensureBluetoothPermissions()
         if (hasBluetoothPermissions()) transport.start(space, activeName)
         presenceJob?.cancel()
         presenceJob = scope.launch {
+            var ticks = 0
             while (isActive && activeKey == key) {
                 val event = makeEvent(CallEvent.Kind.Presence)
                 runCatching { transport.send(event) }
                 delay(8_000)
+                ticks += 1
+                if (ticks % 8 == 0) refreshRemoteMembers(space)
             }
         }
     }
@@ -305,7 +322,10 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     override fun serverStatus(): String =
         backendConfiguration.baseUrl?.takeIf { it.isNotBlank() } ?: "구성되지 않음 (오프라인)"
 
-    override fun onForeground() = notifications.clearDeliveredCalls()
+    override fun onForeground() {
+        notifications.clearDeliveredCalls()
+        activeSpace?.let(::refreshRemoteMembers)
+    }
 
     override fun enableRemoteNotifications(onStatus: (String) -> Unit) {
         scope.launch {
@@ -382,7 +402,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
 
         when (event.kind) {
             CallEvent.Kind.Acknowledge -> activity.runOnUiThread {
-                onAcknowledge(event.senderName, event.ackFor?.toString())
+                onAcknowledge(event.senderName, event.ackFor?.toString(), event.senderID?.toString())
             }
             CallEvent.Kind.Presence -> Unit
             CallEvent.Kind.QuietAlert, CallEvent.Kind.Siren, CallEvent.Kind.DingDong, CallEvent.Kind.VoiceMessage -> {
@@ -442,6 +462,23 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
             targetID = targetID,
             voiceData = voice,
         )
+    }
+
+    private fun refreshRemoteMembers(space: FamilySpace) {
+        if (!backendConfiguration.isConfigured) return
+        scope.launch {
+            val members = runCatching { backend.fetchMembers(space) }.getOrNull() ?: return@launch
+            if (activeSpace?.id != space.id) return@launch
+            val visible = members.filter { it.deviceID != deviceID }.map { member ->
+                PresenceUi(
+                    id = member.deviceID.toString(),
+                    name = member.name,
+                    role = if (member.role == FamilyRole.Parent) AppRole.PARENT else AppRole.CHILD,
+                    isCurrentDevice = false,
+                )
+            }
+            activity.runOnUiThread { onMembers(visible) }
+        }
     }
 
     private fun ensureBluetoothPermissions() {

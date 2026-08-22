@@ -23,12 +23,15 @@ class CallEvent(
     var ackFor: UUID? = null,
 ) {
     enum class Kind(val rawValue: String, val title: String) {
-        QuietAlert("quietAlert", "조용한 호출"),
+        QuietAlert("quietAlert", "톡톡"),
         Siren("siren", "사이렌 호출"),
-        DingDong("dingDong", "띵동 호출"),
-        VoiceMessage("voiceMessage", "음성 메시지"),
+        DingDong("dingDong", "띵동"),
+        VoiceMessage("voiceMessage", "소리"),
         Acknowledge("acknowledge", "확인"),
         Presence("presence", "연결 확인");
+
+        val arrivalTitle: String
+            get() = "$title${if (this == VoiceMessage) "가" else "이"}"
 
         companion object {
             fun fromRawValue(value: String): Kind? = entries.firstOrNull { it.rawValue == value }

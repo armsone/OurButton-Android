@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
         hardware.onAcknowledge = model::presentAcknowledge
         hardware.onTransportStatus = model::updateTransport
         hardware.onPresence = model::updateRemoteMember
+        hardware.onMembers = model::replaceRemoteMembers
         pendingWidgetAction = intent.getStringExtra(EXTRA_WIDGET_ACTION)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -87,7 +88,7 @@ class MainActivity : ComponentActivity() {
         } else when (action) {
             "quiet" -> model.sendQuietTap()
             "ding" -> model.sendDingDong()
-            "voice" -> if (state.role == com.armsone.button.state.AppRole.PARENT) model.showVoice(true)
+            "voice" -> model.showVoice(true)
         }
     }
 

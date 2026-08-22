@@ -92,7 +92,6 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayCircle
@@ -100,6 +99,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SupervisorAccount
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Warning
 import com.armsone.button.data.CallHistoryEntry
 import com.armsone.button.model.CallEvent
@@ -162,6 +162,7 @@ fun ButtonApp(model: AppViewModel) {
             }
             if (state.showInvite) InviteDialog(state.invite, model)
             if (state.showVoice) VoiceDialog(state.voiceState, state.sendCooldownRemainingSeconds, model)
+            if (state.voiceState == VoiceState.READY) VoiceConfirmationDialog(state, model)
             state.incoming?.let { IncomingDialog(it, model) }
             state.errorMessage?.let { GlobalErrorDialog(it, model) }
         }
@@ -411,7 +412,7 @@ private fun RoleCard(role: AppRole, color: Color, model: AppViewModel, modifier:
         Spacer(Modifier.height(10.dp))
         Text(if (parent) "부모" else "자녀", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(3.dp))
-        Text(if (parent) "호출과 목소리를 주고받아요" else "목소리 없이 호출을 주고받아요",
+        Text("소리와 호출을 주고받아요",
             fontSize = 12.sp, color = Secondary, textAlign = TextAlign.Center)
     }
 }
@@ -422,8 +423,9 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
         VoiceState.REQUESTING_PERMISSION -> "권한 확인 중…"
         VoiceState.RECORDING -> "녹음 중…"
         VoiceState.DENIED -> "마이크 설정 필요"
+        VoiceState.READY -> "전송 확인"
         VoiceState.SENT -> "전송했어요"
-        VoiceState.IDLE -> "목소리 전달"
+        VoiceState.IDLE -> "소리"
     }
     val voiceIcon = when (state.voiceState) {
         VoiceState.RECORDING -> Icons.Default.GraphicEq
@@ -438,13 +440,13 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
         else -> Orange
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HomeAction("조용히 알림", Icons.Default.NotificationsOff, Secondary, "quiet_alert",
+        HomeAction("톡톡", Icons.Default.TouchApp, Secondary, "quiet_alert",
             hint = "탭하면 소리 없이 알리고, 5초간 누르면 상대 기기에 사이렌을 보내요", modifier = Modifier.weight(1f),
             cooldownSeconds = 0,
             onTap = model::sendQuietTap, onPressStart = model::beginQuietHold, onPressEnd = model::endQuietHold)
-        HomeAction("띵동 알림", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 알림 화면을 상대 기기에 보여요",
+        HomeAction("띵동", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 알림 화면을 상대 기기에 보여요",
             Modifier.weight(1f), 0, model::sendDingDong)
-        HomeAction(voiceTitle, voiceIcon, voiceColor, "voice", "누르고 있는 동안 최대 15초 녹음해 손을 떼면 전송돼요",
+        HomeAction(voiceTitle, voiceIcon, voiceColor, "voice", "누르고 있는 동안 최대 15초 녹음하고 손을 떼면 보낼지 확인해요",
             Modifier.weight(1f), 0,
             onTap = model::recordAccessibleVoice,
             onPressStart = model::beginVoiceHold,
@@ -468,12 +470,14 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
 @Composable
 private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveContent("child_home") {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HomeAction("조용히 알림", Icons.Default.NotificationsOff, Secondary, "quiet_alert",
+        HomeAction("톡톡", Icons.Default.TouchApp, Secondary, "quiet_alert",
             "탭하면 소리 없이 알리고, 5초간 누르면 부모와 가족 기기에 사이렌을 보내요", Modifier.weight(1f),
             state.sendCooldownRemainingSeconds, model::sendQuietTap,
             model::beginQuietHold, model::endQuietHold)
-        HomeAction("띵동 알림", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 부모와 가족에게 호출을 보내요",
+        HomeAction("띵동", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 부모와 가족에게 호출을 보내요",
             Modifier.weight(1f), state.sendCooldownRemainingSeconds, model::sendDingDong)
+        HomeAction("소리", Icons.Default.Mic, Orange, "voice", "녹음한 소리를 보낼지 확인한 뒤 가족에게 보내요",
+            Modifier.weight(1f), state.sendCooldownRemainingSeconds, { model.showVoice(true) })
     }
     Spacer(Modifier.height(18.dp))
     PresenceCard(state, model::toggleRecipient)
@@ -515,7 +519,7 @@ private fun HomeAction(
         else -> Modifier.clickable(onClick = onTap)
     }
     Column(modifier.heightIn(min = 78.dp).background(Color.White, RoundedCornerShape(16.dp))
-        .border(1.dp, color.copy(.25f), RoundedCornerShape(16.dp)).then(gesture).testTag(tag)
+        .aspectRatio(1f).border(1.dp, color.copy(.25f), RoundedCornerShape(16.dp)).then(gesture).testTag(tag)
         .semantics {
             contentDescription = if (enabled) title else "$title, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
             if (enabled) onClick(label = hint) { onTap(); true } else disabled()
@@ -588,7 +592,7 @@ private fun PresenceTile(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(member.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             val role = if (member.role == AppRole.PARENT) "부모" else if (member.role == AppRole.CHILD) "자녀" else "가족"
-            Text(if (member.isCurrentDevice) "이 기기 · $role" else "연결됨 · $role",
+            Text(if (member.isCurrentDevice) "이 기기 · $role" else "전송 가능 · $role",
                 fontSize = 11.sp, color = Secondary, maxLines = 1)
         }
         if (selected) {
@@ -676,12 +680,13 @@ private fun CallHistoryRow(entry: CallHistoryEntry, onReplayVoice: (CallHistoryE
             modifier = Modifier.size(24.dp),
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            val destination = if (entry.counterpartName == "모두") "모두에게" else "${entry.counterpartName}님에게"
+            val destination = if (entry.counterpartName == "모두") "모두에게" else "${entry.counterpartName}에게"
             Text(
                 if (entry.direction == CallHistoryEntry.Direction.SENT) {
-                    "$destination ${entry.kind.title}을 보냈어요."
+                    val particle = if (entry.kind == CallEvent.Kind.VoiceMessage) "를" else "을"
+                    "$destination ${entry.kind.title}$particle 보냈어요."
                 } else {
-                    "${entry.counterpartName}님의 ${entry.kind.title}이 왔어요."
+                    "${entry.counterpartName}의 ${entry.kind.arrivalTitle} 왔어요."
                 },
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
@@ -700,6 +705,18 @@ private fun CallHistoryRow(entry: CallHistoryEntry, onReplayVoice: (CallHistoryE
                 tint = Orange,
                 modifier = Modifier.size(28.dp).clickable { onReplayVoice(entry) }
                     .testTag("replay_voice_${entry.id}"))
+        }
+        if (entry.pendingRecipientCount > 0) {
+            Text(
+                "${entry.pendingRecipientCount}",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.heightIn(min = 24.dp).background(Accent, CircleShape)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .semantics { contentDescription = "확인하지 않은 사람 ${entry.pendingRecipientCount}명" },
+            )
         }
     }
 }
@@ -760,8 +777,8 @@ private fun QrPlaceholder(value: String) {
 @Composable
 private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewModel) {
     Dialog(onDismissRequest = { model.showVoice(false) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        SheetFrame("목소리 전달", "닫기", { model.showVoice(false) }, "voice_sheet") {
-            Text("버튼을 누르고 있는 동안 녹음되고,\n손을 떼면 바로 전송돼요.", fontSize = 17.sp, color = Secondary,
+        SheetFrame("소리", "닫기", { model.showVoice(false) }, "voice_sheet") {
+            Text("버튼을 누르고 있는 동안 녹음되고,\n손을 떼면 보낼지 확인해요.", fontSize = 17.sp, color = Secondary,
                 textAlign = TextAlign.Center, modifier = Modifier.padding(top = 24.dp))
             Spacer(Modifier.height(28.dp))
             val coolingDown = cooldownSeconds > 0 && state != VoiceState.RECORDING
@@ -775,11 +792,11 @@ private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewM
                     model.beginVoiceHold(); tryAwaitRelease(); model.endVoiceHold()
                 }) }.testTag("voice_hold").semantics {
                     if (coolingDown) {
-                        contentDescription = "목소리 전달 버튼, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
+                        contentDescription = "소리 버튼, ${cooldownSeconds}초 뒤에 다시 보낼 수 있어요"
                         disabled()
                     } else {
-                        contentDescription = "목소리 전달 버튼"
-                        onClick(label = "1초 동안 녹음하고 전송") { model.recordAccessibleVoice(); true }
+                        contentDescription = "소리 버튼"
+                        onClick(label = "1초 동안 녹음하고 전송 여부 확인") { model.recordAccessibleVoice(); true }
                     }
                 }, contentAlignment = Alignment.Center) {
                 Box(Modifier.requiredSize(110.dp).background(color, CircleShape), contentAlignment = Alignment.Center) {
@@ -800,7 +817,8 @@ private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewM
                     Button(onClick = model::openMicrophoneSettings) { Text("마이크 설정 열기") }
                 }
                 state == VoiceState.REQUESTING_PERMISSION -> Text("마이크 권한을 확인하는 중…", fontSize = 13.sp, color = Secondary)
-                state == VoiceState.RECORDING -> Text("녹음 중… 손을 떼면 전송돼요.", fontSize = 13.sp, color = Red)
+                state == VoiceState.RECORDING -> Text("녹음 중… 손을 떼면 보낼지 확인해요.", fontSize = 13.sp, color = Red)
+                state == VoiceState.READY -> Text("녹음이 끝났어요.", fontSize = 13.sp, color = Secondary)
                 state == VoiceState.SENT -> Text("✓  전송했어요", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Green)
                 coolingDown -> Text("${cooldownSeconds}초 뒤에 다시 보낼 수 있어요.", fontSize = 13.sp, color = Secondary)
                 else -> Text("버튼을 누르고 있으면 녹음이 시작돼요. (최대 15초)", fontSize = 13.sp, color = Secondary)
@@ -808,6 +826,21 @@ private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewM
             Spacer(Modifier.weight(1f))
         }
     }
+}
+
+@Composable
+private fun VoiceConfirmationDialog(state: AppUiState, model: AppViewModel) {
+    val recipient = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
+    AlertDialog(
+        onDismissRequest = model::discardVoice,
+        title = { Text("소리를 보낼까요?") },
+        text = {
+            Text(recipient?.let { "${it.name}에게 녹음한 소리를 보내요." }
+                ?: "모두에게 녹음한 소리를 보내요.")
+        },
+        confirmButton = { TextButton(onClick = model::confirmVoiceSend) { Text("보내기") } },
+        dismissButton = { TextButton(onClick = model::discardVoice) { Text("취소") } },
+    )
 }
 
 @Composable
@@ -846,18 +879,18 @@ private fun IncomingDialog(event: IncomingUi, model: AppViewModel) {
                     BellGlyph(88.dp, color)
                     Spacer(Modifier.height(28.dp))
                     val title = when (event.kind) {
-                        IncomingKind.QUIET_ALERT -> "조용한 호출"
+                        IncomingKind.QUIET_ALERT -> "톡톡"
                         IncomingKind.SIREN -> "사이렌 호출"
-                        IncomingKind.DING_DONG -> "띵동 호출"
-                        IncomingKind.VOICE_MESSAGE -> "음성 메시지"
+                        IncomingKind.DING_DONG -> "띵동"
+                        IncomingKind.VOICE_MESSAGE -> "소리"
                     }
-                    Text("${event.senderName}님의 $title", fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    Text("${event.senderName}의 $title", fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(8.dp))
                     Text(event.timeLabel, fontSize = 13.sp, color = Secondary)
                     if (event.hasVoice) {
                         Spacer(Modifier.height(22.dp))
                         OutlinedButton(onClick = model::playVoice, modifier = Modifier.testTag("play_voice")) {
-                            Text("▶  음성 메시지 듣기", fontWeight = FontWeight.SemiBold)
+                            Text("▶  소리 듣기", fontWeight = FontWeight.SemiBold)
                         }
                     }
                     Spacer(Modifier.weight(1f))
@@ -877,6 +910,16 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
             SettingsValue("이름", state.spaceName)
             SettingsValue("역할", if (state.role == AppRole.PARENT) "부모" else if (state.role == AppRole.CHILD) "자녀" else "-")
             SettingsValue("내 이름", state.displayName.ifEmpty { "-" })
+            state.rooms.forEach { room ->
+                SettingsButton(
+                    if (room.invite.spaceId == state.invite?.spaceId) "${room.invite.spaceName} · 사용 중"
+                    else "${room.invite.spaceName} · 전환",
+                    "switch_room_${room.invite.spaceId}",
+                    if (room.invite.spaceId == state.invite?.spaceId) Secondary else Accent,
+                ) { model.switchRoom(room.invite.spaceId) }
+            }
+            SettingsButton("새 가족 공간 만들기", "create_another_room") { model.navigate(AppRoute.CREATE_SPACE) }
+            SettingsButton("다른 공간 초대로 참여", "join_another_room") { model.navigate(AppRoute.JOIN_SPACE) }
             SettingsButton("역할 다시 고르기", "choose_role_again") { model.chooseRoleAgain() }
             SettingsButton("공간 나가기", "leave_space", Red) { confirmLeave = true }
         }

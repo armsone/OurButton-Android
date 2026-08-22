@@ -69,14 +69,38 @@ class CallHistoryStoreTest {
         val sentID = UUID.randomUUID()
         val receivedID = UUID.randomUUID()
         val store = makeStore()
-        store.recordSent(sentID, spaceID, CallEvent.Kind.QuietAlert, null, Instant.now())
+        store.recordSent(sentID, spaceID, CallEvent.Kind.QuietAlert, null, Instant.now(),
+            intendedRecipientCount = 2)
         store.recordReceived(receivedID, spaceID, CallEvent.Kind.QuietAlert, "엄마", Instant.now())
 
         assertTrue(store.markAcknowledged(sentID, "딸"))
         assertTrue(store.markAcknowledged(sentID, "딸"))
         assertFalse(store.markAcknowledged(receivedID, "아들"))
         assertEquals(listOf("딸"), store.entries.first { it.id == sentID }.acknowledgedBy)
+        assertEquals(1, store.entries.first { it.id == sentID }.pendingRecipientCount)
         assertTrue(store.entries.first { it.id == receivedID }.acknowledgedBy.isEmpty())
+    }
+
+    @Test
+    fun pendingRecipientCountStopsAtZero() {
+        val store = makeStore()
+        val sentID = UUID.randomUUID()
+        store.recordSent(sentID, spaceID, CallEvent.Kind.DingDong, "딸", Instant.now(),
+            intendedRecipientCount = 1)
+        assertEquals(1, store.entries.first().pendingRecipientCount)
+        assertTrue(store.markAcknowledged(sentID, "딸"))
+        assertEquals(0, store.entries.first().pendingRecipientCount)
+    }
+
+    @Test
+    fun sameDisplayNameFromDifferentDevicesEachReducesCount() {
+        val store = makeStore()
+        val sentID = UUID.randomUUID()
+        store.recordSent(sentID, spaceID, CallEvent.Kind.QuietAlert, null, Instant.now(),
+            intendedRecipientCount = 2)
+        assertTrue(store.markAcknowledged(sentID, "가족", UUID.randomUUID()))
+        assertTrue(store.markAcknowledged(sentID, "가족", UUID.randomUUID()))
+        assertEquals(0, store.entries.first().pendingRecipientCount)
     }
 
     @Test
@@ -110,6 +134,6 @@ class CallHistoryStoreTest {
         assertNull(store.voiceData(entry))
     }
 
-    private fun makeStore(maxEntries: Int = 50, maxVoiceEntries: Int = 10) =
+    private fun makeStore(maxEntries: Int = 20, maxVoiceEntries: Int = 10) =
         CallHistoryStore(directory, maxEntries, maxVoiceEntries)
 }

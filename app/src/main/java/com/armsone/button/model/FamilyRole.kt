@@ -9,13 +9,13 @@ enum class FamilyRole(
     Parent(
         rawValue = "parent",
         title = "부모",
-        subtitle = "호출과 목소리를 주고받아요",
+        subtitle = "소리와 호출을 주고받아요",
         symbolName = "figure.and.child.holdinghands",
     ),
     Child(
         rawValue = "child",
         title = "자녀",
-        subtitle = "목소리 없이 호출을 주고받아요",
+        subtitle = "소리와 호출을 주고받아요",
         symbolName = "face.smiling",
     );
 

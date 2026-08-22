@@ -32,12 +32,18 @@ data class CallHistoryEntry(
     val counterpartName: String,
     val date: Instant,
     val acknowledgedBy: List<String> = emptyList(),
+    val acknowledgementKeys: List<String>? = null,
+    val intendedRecipientCount: Int? = null,
     val voiceFileName: String? = null,
 ) {
     enum class Direction { SENT, RECEIVED }
 
     val hasReplayableVoice: Boolean
         get() = kind == CallEvent.Kind.VoiceMessage && voiceFileName != null
+    val pendingRecipientCount: Int
+        get() = if (direction == Direction.SENT && intendedRecipientCount != null) {
+            (intendedRecipientCount - (acknowledgementKeys ?: acknowledgedBy).toSet().size).coerceAtLeast(0)
+        } else 0
 }
 
 /** Keeps call metadata and short voice messages on this device only. */
@@ -75,10 +81,12 @@ class CallHistoryStore(
         targetName: String?,
         date: Instant,
         voiceData: ByteArray? = null,
+        intendedRecipientCount: Int = 0,
     ) {
         synchronized(FILE_LOCK) {
             reloadFromDisk()
-            record(id, spaceID, kind, CallHistoryEntry.Direction.SENT, targetName ?: "모두", date, voiceData)
+            record(id, spaceID, kind, CallHistoryEntry.Direction.SENT, targetName ?: "모두", date,
+                voiceData, intendedRecipientCount.coerceAtLeast(0))
         }
     }
 
@@ -105,16 +113,18 @@ class CallHistoryStore(
     }
 
     /** Returns true when the acknowledgement belongs to a sent entry, including duplicates. */
-    fun markAcknowledged(eventID: UUID, by: String): Boolean = synchronized(FILE_LOCK) {
+    fun markAcknowledged(eventID: UUID, by: String, recipientID: UUID? = null): Boolean = synchronized(FILE_LOCK) {
         reloadFromDisk()
         val index = mutableEntries.indexOfFirst {
             it.id == eventID && it.direction == CallHistoryEntry.Direction.SENT
         }
         if (index < 0) return@synchronized false
         val name = by.trim()
-        if (name.isEmpty() || name in mutableEntries[index].acknowledgedBy) return@synchronized true
+        val key = recipientID?.toString()?.lowercase() ?: "name:$name"
+        if (name.isEmpty() || key in mutableEntries[index].acknowledgementKeys.orEmpty()) return@synchronized true
         mutableEntries[index] = mutableEntries[index].copy(
             acknowledgedBy = mutableEntries[index].acknowledgedBy + name,
+            acknowledgementKeys = mutableEntries[index].acknowledgementKeys.orEmpty() + key,
         )
         persist()
         true
@@ -132,6 +142,15 @@ class CallHistoryStore(
         }
     }
 
+    fun clear(spaceID: UUID) {
+        synchronized(FILE_LOCK) {
+            reloadFromDisk()
+            mutableEntries.filter { it.spaceID == spaceID }.forEach(::removeVoiceFile)
+            mutableEntries.removeAll { it.spaceID == spaceID }
+            persist()
+        }
+    }
+
     private fun record(
         id: UUID,
         spaceID: UUID,
@@ -140,6 +159,7 @@ class CallHistoryStore(
         counterpartName: String,
         date: Instant,
         voiceData: ByteArray?,
+        intendedRecipientCount: Int? = null,
     ) {
         if (kind !in RECORDABLE_KINDS || mutableEntries.any { it.id == id }) return
         val playableVoice = voiceData?.takeIf { it.isNotEmpty() }
@@ -159,7 +179,9 @@ class CallHistoryStore(
         } else null
         mutableEntries.add(
             0,
-            CallHistoryEntry(id, spaceID, kind, direction, counterpartName, date, voiceFileName = voiceFileName),
+            CallHistoryEntry(id, spaceID, kind, direction, counterpartName, date,
+                acknowledgementKeys = emptyList(), intendedRecipientCount = intendedRecipientCount,
+                voiceFileName = voiceFileName),
         )
         trimIfNeeded()
         persist()
@@ -234,10 +256,13 @@ class CallHistoryStore(
         .put("counterpartName", counterpartName)
         .put("date", date.toString())
         .put("acknowledgedBy", JSONArray(acknowledgedBy))
+        .put("acknowledgementKeys", acknowledgementKeys?.let(::JSONArray) ?: JSONObject.NULL)
+        .put("intendedRecipientCount", intendedRecipientCount ?: JSONObject.NULL)
         .put("voiceFileName", voiceFileName ?: JSONObject.NULL)
 
     private fun JSONObject.toEntry(): CallHistoryEntry? = runCatching {
         val acknowledgements = optJSONArray("acknowledgedBy")
+        val acknowledgementKeys = optJSONArray("acknowledgementKeys")
         CallHistoryEntry(
             id = UUID.fromString(getString("id")),
             spaceID = UUID.fromString(getString("spaceID")),
@@ -250,12 +275,19 @@ class CallHistoryStore(
                     acknowledgements.optString(index).takeIf(String::isNotBlank)?.let(::add)
                 }
             },
+            acknowledgementKeys = acknowledgementKeys?.let { keys -> buildList {
+                for (index in 0 until keys.length()) {
+                    keys.optString(index).takeIf(String::isNotBlank)?.let(::add)
+                }
+            } },
+            intendedRecipientCount = if (isNull("intendedRecipientCount")) null
+                else optInt("intendedRecipientCount").coerceAtLeast(0),
             voiceFileName = if (isNull("voiceFileName")) null else getString("voiceFileName").takeIf { it.isNotBlank() },
         )
     }.getOrNull()
 
     companion object {
-        const val MAX_ENTRIES = 50
+        const val MAX_ENTRIES = 20
         const val MAX_VOICE_ENTRIES = 10
         private val RECORDABLE_KINDS = setOf(
             CallEvent.Kind.QuietAlert,

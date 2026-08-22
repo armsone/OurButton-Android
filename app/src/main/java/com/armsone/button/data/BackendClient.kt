@@ -8,6 +8,7 @@ import com.armsone.button.model.FamilyRole
 import com.armsone.button.model.FamilySpace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -48,7 +49,14 @@ interface BackendClient {
     )
     suspend fun send(event: CallEvent, spaceSecret: String)
     suspend fun fetchEvent(id: UUID, space: FamilySpace): CallEvent
+    suspend fun fetchMembers(space: FamilySpace): List<RemoteFamilyMember>
 }
+
+data class RemoteFamilyMember(
+    val deviceID: UUID,
+    val name: String,
+    val role: FamilyRole,
+)
 
 /** Boundary kept separate from Firebase so registration and backend behavior remain testable. */
 interface PushTokenProvider {
@@ -97,6 +105,20 @@ class HttpBackendClient(private val configuration: BackendConfiguration) : Backe
     override suspend fun fetchEvent(id: UUID, space: FamilySpace): CallEvent =
         CallEventCoder.decode(request("v1/spaces/${space.id}/calls/$id", "GET", space.secret))
 
+    override suspend fun fetchMembers(space: FamilySpace): List<RemoteFamilyMember> {
+        val response = JSONObject(String(request(
+            "v1/spaces/${space.id}/members", "GET", space.secret,
+        )))
+        return response.getJSONArray("members").mapObjects { member ->
+            RemoteFamilyMember(
+                deviceID = UUID.fromString(member.getString("deviceID")),
+                name = member.getString("name"),
+                role = FamilyRole.fromRawValue(member.getString("role"))
+                    ?: throw IllegalArgumentException("invalid family role"),
+            )
+        }
+    }
+
     private suspend fun request(
         path: String,
         method: String,
@@ -126,3 +148,6 @@ class HttpBackendClient(private val configuration: BackendConfiguration) : Backe
         }
     }
 }
+
+private fun <T> JSONArray.mapObjects(transform: (JSONObject) -> T): List<T> =
+    List(length()) { index -> transform(getJSONObject(index)) }

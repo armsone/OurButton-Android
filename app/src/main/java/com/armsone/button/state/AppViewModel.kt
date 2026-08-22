@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import org.json.JSONArray
 import java.time.Instant
 import java.util.UUID
 
@@ -26,7 +27,7 @@ enum class AppRole { PARENT, CHILD }
 enum class AppRoute { WELCOME, CREATE_SPACE, JOIN_SPACE, SETTINGS }
 enum class TransportUiStatus { IDLE, SEARCHING, CONNECTED, DEMO }
 enum class IncomingKind { QUIET_ALERT, SIREN, DING_DONG, VOICE_MESSAGE }
-enum class VoiceState { IDLE, REQUESTING_PERMISSION, DENIED, RECORDING, SENT }
+enum class VoiceState { IDLE, REQUESTING_PERMISSION, DENIED, RECORDING, READY, SENT }
 enum class CallActivityKind { SENT, ACKNOWLEDGED }
 
 data class CallActivityUi(val kind: CallActivityKind, val message: String)
@@ -42,6 +43,12 @@ data class InviteUi(val spaceId: String, val spaceName: String, val secret: Stri
     val url: String
         get() = QRInvite(UUID.fromString(spaceId), spaceName, secret).urlString
 }
+
+data class SavedRoomUi(
+    val invite: InviteUi,
+    val displayName: String,
+    val role: AppRole?,
+)
 
 data class IncomingUi(
     val id: String = UUID.randomUUID().toString(),
@@ -66,6 +73,7 @@ data class AppUiState(
     val members: List<PresenceUi> = emptyList(),
     val isDemoMode: Boolean = false,
     val invite: InviteUi? = null,
+    val rooms: List<SavedRoomUi> = emptyList(),
     val showInvite: Boolean = false,
     val showVoice: Boolean = false,
     val voiceState: VoiceState = VoiceState.IDLE,
@@ -134,8 +142,11 @@ class AppViewModel(
     private var incomingDismissJob: Job? = null
     private var voiceLimitJob: Job? = null
     private val memberExpiryJobs = mutableMapOf<String, Job>()
+    private val localMemberIDs = mutableSetOf<String>()
+    private val remoteMemberIDs = mutableSetOf<String>()
     private val sentCallIDs = mutableMapOf<String, Long>()
     private var suppressNextQuietTap = false
+    private var pendingVoiceData: ByteArray? = null
 
     fun attachHardware(gateway: AppHardwareGateway) {
         hardware = gateway
@@ -150,10 +161,11 @@ class AppViewModel(
         if (name.isEmpty() || member.isEmpty()) return
         val space = FamilySpace(name = name)
         val invite = InviteUi(space.id.toString(), space.name, space.secret)
-        clearHistoryIfSpaceChanged(invite.spaceId)
         _uiState.update {
+            val room = SavedRoomUi(invite, member, null)
             it.copy(phase = AppPhase.ROLE_SELECTION, route = AppRoute.WELCOME,
                 spaceName = name, displayName = member, invite = invite,
+                role = null, rooms = it.rooms.filterNot { saved -> saved.invite.spaceId == invite.spaceId } + room,
                 transportStatus = TransportUiStatus.SEARCHING,
                 callHistory = historyFor(invite.spaceId))
         }
@@ -168,11 +180,14 @@ class AppViewModel(
     fun join(invite: InviteUi, memberName: String) {
         val member = prefixCodePoints(memberName.trim(), 20)
         if (member.isEmpty()) return
-        clearHistoryIfSpaceChanged(invite.spaceId)
-        _uiState.update { it.copy(phase = AppPhase.ROLE_SELECTION, route = AppRoute.WELCOME,
+        _uiState.update {
+            val room = SavedRoomUi(invite, member, null)
+            it.copy(phase = AppPhase.ROLE_SELECTION, route = AppRoute.WELCOME,
             spaceName = invite.spaceName, displayName = member, invite = invite,
+            role = null, rooms = it.rooms.filterNot { saved -> saved.invite.spaceId == invite.spaceId } + room,
             transportStatus = TransportUiStatus.SEARCHING,
-            callHistory = historyFor(invite.spaceId)) }
+            callHistory = historyFor(invite.spaceId))
+        }
         persist()
     }
 
@@ -181,12 +196,19 @@ class AppViewModel(
             cooldownJob?.cancel()
             sendCooldown.reset()
         }
+        localMemberIDs.clear()
+        remoteMemberIDs.clear()
         _uiState.update {
             val own = PresenceUi("current", it.displayName.ifEmpty { "이 기기" }, role, true)
             it.copy(
                 phase = AppPhase.HOME,
                 role = role,
                 members = listOf(own),
+                rooms = it.rooms.map { room ->
+                    if (room.invite.spaceId == it.invite?.spaceId) {
+                        room.copy(displayName = it.displayName, role = role)
+                    } else room
+                },
                 sendCooldownRemainingSeconds = if (role == AppRole.PARENT) 0 else it.sendCooldownRemainingSeconds,
             )
         }
@@ -264,15 +286,28 @@ class AppViewModel(
     private fun finishVoice(data: ByteArray?) {
         voiceLimitJob?.cancel()
         if (data == null || data.isEmpty()) {
+            pendingVoiceData = null
             _uiState.update { it.copy(voiceState = VoiceState.IDLE) }
             return
         }
+        pendingVoiceData = data
+        _uiState.update { it.copy(voiceState = VoiceState.READY) }
+    }
+
+    fun confirmVoiceSend() {
+        val data = pendingVoiceData ?: return
+        pendingVoiceData = null
         sendCall(IncomingKind.VOICE_MESSAGE, data)
         _uiState.update { it.copy(voiceState = VoiceState.SENT) }
         viewModelScope.launch {
             delay(2_000)
             _uiState.update { it.copy(voiceState = VoiceState.IDLE) }
         }
+    }
+
+    fun discardVoice() {
+        pendingVoiceData = null
+        _uiState.update { it.copy(voiceState = VoiceState.IDLE) }
     }
 
     fun presentIncoming(event: IncomingUi) {
@@ -314,7 +349,7 @@ class AppViewModel(
         if (_uiState.value.isDemoMode) {
             viewModelScope.launch {
                 delay(1_200)
-                presentAcknowledge(senderName(), event.id)
+                presentAcknowledge(senderName(), event.id, null)
             }
         } else {
             hardware.acknowledge(event.id, event.senderID)
@@ -330,7 +365,39 @@ class AppViewModel(
 
     fun chooseRoleAgain() {
         cancelTransientWork()
-        _uiState.update { it.copy(phase = AppPhase.ROLE_SELECTION, role = null, route = AppRoute.WELCOME) }
+        pendingVoiceData = null
+        localMemberIDs.clear()
+        remoteMemberIDs.clear()
+        _uiState.update {
+            it.copy(phase = AppPhase.ROLE_SELECTION, role = null, route = AppRoute.WELCOME,
+                rooms = it.rooms.map { room ->
+                    if (room.invite.spaceId == it.invite?.spaceId) room.copy(role = null) else room
+                })
+        }
+        persist()
+    }
+
+    fun switchRoom(spaceID: String) {
+        val room = _uiState.value.rooms.firstOrNull { it.invite.spaceId == spaceID } ?: return
+        if (room.invite.spaceId == _uiState.value.invite?.spaceId) return
+        cancelTransientWork()
+        localMemberIDs.clear()
+        remoteMemberIDs.clear()
+        val own = room.role?.let { listOf(PresenceUi("current", room.displayName, it, true)) }.orEmpty()
+        _uiState.update {
+            it.copy(
+                phase = if (room.role == null) AppPhase.ROLE_SELECTION else AppPhase.HOME,
+                route = AppRoute.WELCOME,
+                role = room.role,
+                spaceName = room.invite.spaceName,
+                displayName = room.displayName,
+                invite = room.invite,
+                members = own,
+                selectedTargetID = null,
+                callHistory = historyFor(room.invite.spaceId),
+                transportStatus = if (it.isDemoMode) TransportUiStatus.DEMO else TransportUiStatus.SEARCHING,
+            )
+        }
         persist()
     }
 
@@ -341,10 +408,20 @@ class AppViewModel(
         sendCooldown.reset()
         memberExpiryJobs.values.forEach(Job::cancel)
         memberExpiryJobs.clear()
-        historyStore.clear()
+        localMemberIDs.clear()
+        remoteMemberIDs.clear()
+        pendingVoiceData = null
+        val leaving = currentSpaceID()
+        if (leaving != null) historyStore.clear(leaving)
         pendingVoiceStore.clear()
-        prefs.edit().clear().apply()
-        _uiState.value = AppUiState()
+        val remaining = _uiState.value.rooms.filterNot { it.invite.spaceId == leaving?.toString() }
+        if (remaining.isEmpty()) {
+            prefs.edit().clear().apply()
+            _uiState.value = AppUiState()
+        } else {
+            _uiState.update { it.copy(rooms = remaining) }
+            switchRoom(remaining.first().invite.spaceId)
+        }
     }
 
     fun playDingDong() = hardware.playDingDong()
@@ -367,17 +444,21 @@ class AppViewModel(
         if (it.isDemoMode) it else it.copy(transportStatus = status, connectedCount = connectedCount)
     }
 
-    fun presentAcknowledge(senderName: String, ackFor: String?) {
+    fun presentAcknowledge(senderName: String, ackFor: String?, senderID: String? = null) {
         val originalID = ackFor ?: return
         pruneSentCallIDs()
         val wasRecorded = runCatching { UUID.fromString(originalID) }.getOrNull()
-            ?.let { historyStore.markAcknowledged(it, senderName) }
+            ?.let { eventID ->
+                historyStore.markAcknowledged(
+                    eventID, senderName, senderID?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                )
+            }
             ?: false
         if (!sentCallIDs.containsKey(originalID) && !wasRecorded) return
         _uiState.update {
             it.copy(callActivity = CallActivityUi(
                 CallActivityKind.ACKNOWLEDGED,
-                "${senderName}님이 호출을 확인했어요.",
+                "${koreanSubject(senderName)} 호출을 확인했어요.",
             ), callHistory = historyForCurrentSpace())
         }
     }
@@ -391,6 +472,7 @@ class AppViewModel(
 
     fun updateRemoteMember(id: String, name: String, role: AppRole?) {
         if (id == "current") return
+        localMemberIDs += id
         _uiState.update { state ->
             val own = state.members.filter { it.isCurrentDevice }
             val remote = state.members.filterNot { it.isCurrentDevice || it.id == id } +
@@ -400,13 +482,44 @@ class AppViewModel(
         memberExpiryJobs.remove(id)?.cancel()
         memberExpiryJobs[id] = viewModelScope.launch {
             delay(600_000)
+            localMemberIDs -= id
             _uiState.update {
                 it.copy(
-                    members = it.members.filterNot { member -> member.id == id },
-                    selectedTargetID = it.selectedTargetID?.takeUnless { selected -> selected == id },
+                    members = if (id in remoteMemberIDs) it.members
+                        else it.members.filterNot { member -> member.id == id },
+                    selectedTargetID = it.selectedTargetID?.takeUnless { selected ->
+                        selected == id && id !in remoteMemberIDs
+                    },
                 )
             }
             memberExpiryJobs.remove(id)
+        }
+    }
+
+    fun replaceRemoteMembers(members: List<PresenceUi>) {
+        remoteMemberIDs.clear()
+        remoteMemberIDs += members.map { it.id }
+        _uiState.update { state ->
+            val byID = state.members.associateByTo(linkedMapOf()) { it.id }
+            byID.entries.removeAll { (id, member) ->
+                !member.isCurrentDevice && id !in localMemberIDs && id !in remoteMemberIDs
+            }
+            members.forEach { member ->
+                val id = member.id
+                val existing = byID[id]
+                byID[id] = member.copy(name = member.name.ifBlank { "가족" })
+                    .let { remote -> if (existing != null && id in localMemberIDs) {
+                        remote.copy(name = existing.name, role = existing.role)
+                    } else remote }
+            }
+            val visible = byID.values.sortedWith(compareByDescending<PresenceUi> { it.isCurrentDevice }
+                .thenBy { it.name })
+            state.copy(
+                members = visible,
+                selectedTargetID = state.selectedTargetID?.takeIf { selected ->
+                    visible.any { it.id == selected && !it.isCurrentDevice }
+                },
+            )
         }
     }
 
@@ -423,8 +536,10 @@ class AppViewModel(
             )
         }
         pendingVoiceStore.take()?.let { eventID ->
+            val activeSpaceID = currentSpaceID()
             historyStore.entries.firstOrNull {
                 it.id == eventID &&
+                    it.spaceID == activeSpaceID &&
                     it.direction == CallHistoryEntry.Direction.RECEIVED &&
                     Instant.now().epochSecond - it.date.epochSecond <= 600
             }?.let(historyStore::voiceData)?.let(hardware::playVoice)
@@ -460,9 +575,9 @@ class AppViewModel(
             "parent_home_targeted" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 selectedTargetID = FIXTURE_CHILD_ID)
             "parent_home_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
-                callActivity = CallActivityUi(CallActivityKind.SENT, "첫째님에게 띵동 호출을 보냈어요."))
+                callActivity = CallActivityUi(CallActivityKind.SENT, "첫째에게 띵동 호출을 보냈어요."))
             "parent_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
-                callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째님이 호출을 확인했어요."))
+                callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째가 호출을 확인했어요."))
             "parent_home_history" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 callHistory = fixtureHistory())
             "parent_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
@@ -473,6 +588,8 @@ class AppViewModel(
                 transportStatus = TransportUiStatus.SEARCHING, connectedCount = 0)
             "parent_home_voice_recording" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 voiceState = VoiceState.RECORDING)
+            "parent_home_voice_ready" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                voiceState = VoiceState.READY)
             "parent_home_voice_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 voiceState = VoiceState.SENT)
             "parent_home_siren_countdown" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
@@ -483,7 +600,7 @@ class AppViewModel(
             "child_home_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 callActivity = CallActivityUi(CallActivityKind.SENT, "모두에게 조용한 호출을 보냈어요."))
             "child_home_ack" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
-                callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째님이 호출을 확인했어요."))
+                callActivity = CallActivityUi(CallActivityKind.ACKNOWLEDGED, "첫째가 호출을 확인했어요."))
             "child_home_history" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 callHistory = fixtureHistory())
             "child_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
@@ -494,6 +611,7 @@ class AppViewModel(
             "voice_idle" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true)
             "voice_requesting" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true, voiceState = VoiceState.REQUESTING_PERMISSION)
             "voice_recording" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true, voiceState = VoiceState.RECORDING)
+            "voice_ready" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true, voiceState = VoiceState.READY)
             "voice_denied" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true, voiceState = VoiceState.DENIED)
             "voice_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true, voiceState = VoiceState.SENT)
             "incoming_quiet" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD, incoming = IncomingUi(senderName = "엄마", kind = IncomingKind.QUIET_ALERT))
@@ -557,11 +675,30 @@ class AppViewModel(
         val json = JSONObject(prefs.getString("state", null) ?: return AppUiState())
         val spaceName = json.optString("spaceName")
         if (spaceName.isBlank()) return AppUiState()
-        val role = json.optString("role").takeIf { it.isNotBlank() }?.let(AppRole::valueOf)
-        val invite = InviteUi(json.getString("spaceId"), spaceName, json.getString("secret"))
-        val displayName = json.optString("displayName")
+        val legacyRole = json.optString("role").takeIf { it.isNotBlank() }?.let(AppRole::valueOf)
+        val legacyInvite = InviteUi(json.getString("spaceId"), spaceName, json.getString("secret"))
+        val legacyDisplayName = json.optString("displayName")
+        val rooms = buildList {
+            val array = json.optJSONArray("rooms")
+            if (array != null) for (index in 0 until array.length()) {
+                val room = array.optJSONObject(index) ?: continue
+                val roomRole = room.optString("role").takeIf { it.isNotBlank() }?.let(AppRole::valueOf)
+                add(SavedRoomUi(
+                    InviteUi(room.getString("spaceId"), room.getString("spaceName"), room.getString("secret")),
+                    room.optString("displayName"), roomRole,
+                ))
+            }
+            if (none { it.invite.spaceId == legacyInvite.spaceId }) {
+                add(SavedRoomUi(legacyInvite, legacyDisplayName, legacyRole))
+            }
+        }
+        val active = rooms.firstOrNull { it.invite.spaceId == legacyInvite.spaceId } ?: rooms.first()
+        val role = active.role
+        val invite = active.invite
+        val displayName = active.displayName
         AppUiState(phase = if (role == null) AppPhase.ROLE_SELECTION else AppPhase.HOME,
             role = role, spaceName = spaceName, displayName = displayName, invite = invite,
+            rooms = rooms,
             isDemoMode = json.optBoolean("demo"),
             transportStatus = if (json.optBoolean("demo")) TransportUiStatus.DEMO else TransportUiStatus.SEARCHING,
             members = if (role == null) emptyList() else listOf(PresenceUi("current", displayName, role, true)),
@@ -575,6 +712,16 @@ class AppViewModel(
         val json = JSONObject().put("spaceName", s.spaceName).put("displayName", s.displayName)
             .put("spaceId", invite.spaceId).put("secret", invite.secret)
             .put("role", s.role?.name.orEmpty()).put("demo", s.isDemoMode)
+            .put("rooms", JSONArray().also { array ->
+                s.rooms.forEach { room ->
+                    array.put(JSONObject()
+                        .put("spaceName", room.invite.spaceName)
+                        .put("spaceId", room.invite.spaceId)
+                        .put("secret", room.invite.secret)
+                        .put("displayName", room.displayName)
+                        .put("role", room.role?.name.orEmpty()))
+                }
+            })
         prefs.edit().putString("state", json.toString()).apply()
     }
 
@@ -606,17 +753,18 @@ class AppViewModel(
         }
         val state = _uiState.value
         val target = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
+        val intendedRecipientCount = if (target == null) state.members.count { !it.isCurrentDevice } else 1
         if (state.isDemoMode) {
             val eventID = UUID.randomUUID().toString()
             if (target == null) demoEcho(eventID, kind, voice)
-            recordSentCall(eventID, kind, voice, target)
+            recordSentCall(eventID, kind, voice, target, intendedRecipientCount)
         } else {
             hardware.send(
                 kind = kind,
                 voice = voice,
                 targetID = target?.id,
                 onError = ::showError,
-                onSent = { eventID -> recordSentCall(eventID, kind, voice, target) },
+                onSent = { eventID -> recordSentCall(eventID, kind, voice, target, intendedRecipientCount) },
             )
         }
     }
@@ -626,16 +774,17 @@ class AppViewModel(
         kind: IncomingKind,
         voice: ByteArray?,
         target: PresenceUi?,
+        intendedRecipientCount: Int,
     ) {
         val parsedID = runCatching { UUID.fromString(eventID) }.getOrNull() ?: return
         pruneSentCallIDs()
         sentCallIDs[eventID] = System.currentTimeMillis()
-        val destination = target?.name?.let { "${it}님에게" } ?: "모두에게"
+        val destination = target?.name?.let { "${it}에게" } ?: "모두에게"
         val title = when (kind) {
-            IncomingKind.QUIET_ALERT -> "조용한 호출"
+            IncomingKind.QUIET_ALERT -> "톡톡"
             IncomingKind.SIREN -> "사이렌 호출"
-            IncomingKind.DING_DONG -> "띵동 호출"
-            IncomingKind.VOICE_MESSAGE -> "음성 메시지"
+            IncomingKind.DING_DONG -> "띵동"
+            IncomingKind.VOICE_MESSAGE -> "소리"
         }
         currentSpaceID()?.let { spaceID ->
             historyStore.recordSent(
@@ -645,14 +794,22 @@ class AppViewModel(
                 targetName = target?.name,
                 date = Instant.now(),
                 voiceData = voice,
+                intendedRecipientCount = intendedRecipientCount,
             )
         }
         _uiState.update {
+            val particle = if (kind == IncomingKind.VOICE_MESSAGE) "를" else "을"
             it.copy(callActivity = CallActivityUi(
                 CallActivityKind.SENT,
-                "$destination $title\uC744 \uBCF4\uB0C8\uC5B4\uC694.",
+                "$destination $title$particle 보냈어요.",
             ), callHistory = historyForCurrentSpace())
         }
+    }
+
+    private fun koreanSubject(name: String): String {
+        val last = name.lastOrNull() ?: return "가족이"
+        val particle = if (last in '\uAC00'..'\uD7A3' && (last.code - 0xAC00) % 28 != 0) "이" else "가"
+        return "$name$particle"
     }
 
     private fun startCooldownUpdates() {
@@ -685,11 +842,6 @@ class AppViewModel(
         .getOrNull()
         ?.let { parsed -> historyStore.entries.filter { it.spaceID == parsed } }
         .orEmpty()
-
-    private fun clearHistoryIfSpaceChanged(nextSpaceID: String) {
-        val currentSpaceID = _uiState.value.invite?.spaceId ?: return
-        if (currentSpaceID != nextSpaceID) historyStore.clear()
-    }
 
     private fun pruneSentCallIDs() {
         val cutoff = System.currentTimeMillis() - 600_000

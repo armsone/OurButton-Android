@@ -76,8 +76,8 @@ class PushDeliveryWorker(
             ),
         ) ?: return Result.failure()
         val store = PushStore(applicationContext)
-        val membership = store.membership ?: return Result.success()
-        if (membership.space.id != envelope.spaceID) return Result.success()
+        val membership = store.memberships.firstOrNull { it.space.id == envelope.spaceID }
+            ?: return Result.success()
         val configuration = BackendConfiguration.load(applicationContext)
         if (!configuration.isConfigured) return Result.failure()
         val event = runCatching {
@@ -94,7 +94,7 @@ class PushDeliveryWorker(
         if (!DeliveryDeduplicator(applicationContext).markIfNew(event.id)) return Result.success()
         val history = CallHistoryStore(applicationContext)
         if (event.kind == CallEvent.Kind.Acknowledge) {
-            event.ackFor?.let { history.markAcknowledged(it, event.senderName) }
+            event.ackFor?.let { history.markAcknowledged(it, event.senderName, event.senderID) }
         } else {
             history.recordReceived(event)
         }

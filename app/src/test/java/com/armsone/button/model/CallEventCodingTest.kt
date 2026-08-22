@@ -28,6 +28,9 @@ class CallEventCodingTest {
         }
         assertFalse(CallEvent.Kind.QuietAlert.title == CallEvent.Kind.DingDong.title)
         assertEquals("siren", CallEvent.Kind.Siren.rawValue)
+        assertEquals("톡톡이", CallEvent.Kind.QuietAlert.arrivalTitle)
+        assertEquals("띵동이", CallEvent.Kind.DingDong.arrivalTitle)
+        assertEquals("소리가", CallEvent.Kind.VoiceMessage.arrivalTitle)
     }
 
     @Test

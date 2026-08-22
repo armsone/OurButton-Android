@@ -17,6 +17,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
+import org.json.JSONArray
 import java.security.MessageDigest
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -102,8 +103,9 @@ class PushRegistrationManager(
     private val appContext = context.applicationContext
     private val store = PushStore(appContext)
 
-    fun updateMembership(membership: PushMembership) = store.saveMembership(membership)
-    fun clearMembership() = store.clearMembership()
+    fun updateMembership(membership: PushMembership) = updateMemberships(listOf(membership))
+    fun updateMemberships(memberships: List<PushMembership>) = store.saveMemberships(memberships)
+    fun clearMembership() = store.clearMemberships()
     fun statusDescription(): String = when {
         tokens.statusDescription == "Firebase 설정 필요" -> tokens.statusDescription
         store.registeredFingerprint != null -> "FCM 등록됨"
@@ -121,33 +123,33 @@ class PushRegistrationManager(
     }
 
     private suspend fun register(token: String): Result<Unit> {
-        val membership = store.membership ?: return Result.failure(
+        val memberships = store.memberships
+        if (memberships.isEmpty()) return Result.failure(
             IllegalStateException("먼저 가족 공간에 참여해 주세요."),
         )
-        val fingerprint = registrationFingerprint(token, membership)
+        val fingerprint = registrationFingerprint(token, memberships)
         if (store.registeredFingerprint == fingerprint) return Result.success(Unit)
         return runCatching {
-            backend.registerDevice(
-                token,
-                membership.space,
-                membership.deviceID,
-                membership.name,
-                membership.role,
-                "production",
-            )
+            memberships.forEach { membership ->
+                backend.registerDevice(
+                    token,
+                    membership.space,
+                    membership.deviceID,
+                    membership.name,
+                    membership.role,
+                    "production",
+                )
+            }
             store.registeredFingerprint = fingerprint
         }
     }
 
-    private fun registrationFingerprint(token: String, membership: PushMembership): String {
-        val bytes = listOf(
-            token,
-            membership.space.id,
-            membership.space.secret,
-            membership.deviceID,
-            membership.name,
-            membership.role.rawValue,
-        ).joinToString("\u0000").toByteArray()
+    private fun registrationFingerprint(token: String, memberships: List<PushMembership>): String {
+        val parts = memberships.sortedBy { it.space.id.toString() }.flatMap { membership -> listOf(
+            membership.space.id, membership.space.secret, membership.deviceID,
+            membership.name, membership.role.rawValue,
+        ) }
+        val bytes = (listOf(token) + parts).joinToString("\u0000").toByteArray()
         return MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it) }
     }
@@ -175,18 +177,31 @@ internal class PushStore(context: Context) {
         get() = prefs.getString("registeredFingerprint", null)
         set(value) { prefs.edit().putString("registeredFingerprint", value).apply() }
 
-    val membership: PushMembership?
+    val memberships: List<PushMembership>
         get() = runCatching {
-            val json = JSONObject(prefs.getString("membership", null) ?: return null)
+            val stored = prefs.getString("memberships", null)
+            if (stored != null) {
+                val array = JSONArray(stored)
+                return buildList {
+                    for (index in 0 until array.length()) {
+                        array.optJSONObject(index)?.toMembership()?.let(::add)
+                    }
+                }
+            }
+            val legacy = prefs.getString("membership", null) ?: return emptyList()
+            listOfNotNull(JSONObject(legacy).toMembership())
+        }.getOrDefault(emptyList())
+
+    private fun JSONObject.toMembership(): PushMembership? = runCatching {
             PushMembership(
                 FamilySpace(
-                    UUID.fromString(json.getString("spaceID")),
-                    json.getString("spaceName"),
-                    json.getString("secret"),
+                    UUID.fromString(getString("spaceID")),
+                    getString("spaceName"),
+                    getString("secret"),
                 ),
-                UUID.fromString(json.getString("deviceID")),
-                json.getString("name"),
-                FamilyRole.fromRawValue(json.getString("role")) ?: return null,
+                UUID.fromString(getString("deviceID")),
+                getString("name"),
+                FamilyRole.fromRawValue(getString("role")) ?: return null,
             )
         }.getOrNull()
 
@@ -196,21 +211,23 @@ internal class PushStore(context: Context) {
         prefs.edit().remove("token").remove("registeredFingerprint").apply()
     }
 
-    fun saveMembership(value: PushMembership) {
-        val json = JSONObject()
+    fun saveMemberships(values: List<PushMembership>) {
+        val json = JSONArray()
+        values.sortedBy { it.space.id.toString() }.forEach { value -> json.put(JSONObject()
             .put("spaceID", value.space.id.toString())
             .put("spaceName", value.space.name)
             .put("secret", value.space.secret)
             .put("deviceID", value.deviceID.toString())
             .put("name", value.name)
-            .put("role", value.role.rawValue)
-        val changed = prefs.getString("membership", null) != json.toString()
-        prefs.edit().putString("membership", json.toString()).apply()
+            .put("role", value.role.rawValue))
+        }
+        val changed = prefs.getString("memberships", null) != json.toString()
+        prefs.edit().putString("memberships", json.toString()).remove("membership").apply()
         if (changed) registeredFingerprint = null
     }
 
-    fun clearMembership() {
-        prefs.edit().remove("membership").remove("registeredFingerprint").apply()
+    fun clearMemberships() {
+        prefs.edit().remove("membership").remove("memberships").remove("registeredFingerprint").apply()
     }
 }
 
