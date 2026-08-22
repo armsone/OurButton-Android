@@ -34,4 +34,16 @@ class FcmEnvelopeTest {
         assertNull(FcmEnvelope.parse(valid + ("spaceID" to "not-a-uuid")))
         assertNull(FcmEnvelope.parse(valid + ("kind" to CallEvent.Kind.Presence.rawValue)))
     }
+
+    @Test
+    fun acceptsSirenRoutingMessage() {
+        val value = FcmEnvelope.parse(
+            mapOf(
+                "eventID" to UUID.randomUUID().toString(),
+                "spaceID" to UUID.randomUUID().toString(),
+                "kind" to CallEvent.Kind.Siren.rawValue,
+            ),
+        )
+        assertEquals(CallEvent.Kind.Siren, value?.kind)
+    }
 }

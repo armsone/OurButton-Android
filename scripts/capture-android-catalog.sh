@@ -16,9 +16,10 @@ else
   fixtures=(
     setup_welcome setup_create setup_join setup_join_invalid setup_join_confirmed
     role_selection parent_home parent_home_targeted parent_home_sent parent_home_ack parent_home_history parent_home_demo parent_home_idle
-    parent_home_searching child_home child_home_targeted child_home_sent child_home_ack child_home_history child_home_demo invite_qr voice_idle
+    parent_home_voice_recording parent_home_voice_sent parent_home_siren_countdown
+    parent_home_searching child_home child_home_targeted child_home_sent child_home_ack child_home_history child_home_demo child_home_siren_countdown invite_qr voice_idle
     voice_requesting voice_recording voice_denied voice_sent incoming_quiet
-    incoming_dingdong incoming_voice settings settings_notification_denied
+    incoming_dingdong incoming_voice incoming_siren settings settings_notification_denied
     settings_notification_allowed settings_remote_configured global_error
   )
 fi

@@ -57,6 +57,14 @@ class CallHistoryStoreTest {
     }
 
     @Test
+    fun sirenIsKeptInHistory() {
+        val store = makeStore()
+        store.recordReceived(UUID.randomUUID(), spaceID, CallEvent.Kind.Siren, "엄마", Instant.now())
+
+        assertEquals(CallEvent.Kind.Siren, makeStore().entries.first().kind)
+    }
+
+    @Test
     fun acknowledgementUpdatesOnlySentEntryAndIsIdempotent() {
         val sentID = UUID.randomUUID()
         val receivedID = UUID.randomUUID()

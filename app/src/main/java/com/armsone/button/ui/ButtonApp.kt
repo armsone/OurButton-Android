@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -76,15 +77,30 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.ArrowBackIosNew
 import androidx.compose.material.icons.filled.ArrowCircleDown
 import androidx.compose.material.icons.filled.ArrowCircleUp
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SupervisorAccount
+import androidx.compose.material.icons.filled.Warning
 import com.armsone.button.data.CallHistoryEntry
 import com.armsone.button.model.CallEvent
 import com.armsone.button.state.AppPhase
@@ -123,15 +139,15 @@ fun ButtonApp(model: AppViewModel) {
     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = Accent)) {
         Box(Modifier.fillMaxSize()) {
             CalmBackground()
-            AppScaffold(title = titleFor(state), leading = {
+            AppScaffold(title = titleFor(state), subtitle = homeStatusFor(state), leading = {
                 when {
-                    state.route != AppRoute.WELCOME -> ToolbarText("‹", "뒤로", "nav_back") { model.back() }
+                    state.route != AppRoute.WELCOME -> ToolbarButton(Icons.Default.ArrowBackIosNew, "뒤로", "nav_back") { model.back() }
                     state.phase == AppPhase.HOME && state.role == AppRole.PARENT ->
-                        ToolbarText("▦", "가족 초대 QR 보기", "open_invite") { model.showInvite(true) }
+                        ToolbarButton(Icons.Default.QrCode2, "가족 초대 QR 보기", "open_invite") { model.showInvite(true) }
                 }
             }, trailing = {
                 if (state.phase == AppPhase.HOME && state.route == AppRoute.WELCOME) {
-                    ToolbarText("⚙", "설정", "open_settings") { model.navigate(AppRoute.SETTINGS) }
+                    ToolbarButton(Icons.Default.Settings, "설정", "open_settings") { model.navigate(AppRoute.SETTINGS) }
                 }
             }) {
                 when {
@@ -161,6 +177,12 @@ private fun titleFor(state: AppUiState): String = when {
     else -> state.spaceName.ifBlank { "버튼" }
 }
 
+private fun homeStatusFor(state: AppUiState): String? {
+    if (state.phase != AppPhase.HOME || state.route != AppRoute.WELCOME) return null
+    if (state.role == AppRole.PARENT && state.voiceState == VoiceState.RECORDING) return "녹음 중…"
+    return state.quietHoldRemainingSeconds.takeIf { it > 0 }?.let { "사이렌까지 ${it}초" }
+}
+
 @Composable
 private fun CalmBackground() {
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Grouped, Accent.copy(alpha = .08f)))))
@@ -169,6 +191,7 @@ private fun CalmBackground() {
 @Composable
 private fun AppScaffold(
     title: String,
+    subtitle: String?,
     leading: @Composable () -> Unit,
     trailing: @Composable () -> Unit,
     content: @Composable () -> Unit,
@@ -177,8 +200,23 @@ private fun AppScaffold(
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterStart) { leading() }
-            Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center, modifier = Modifier.weight(1f).testTag("screen_title"))
+            Column(
+                modifier = Modifier.weight(1f).testTag("screen_title"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center, maxLines = 1)
+                Text(
+                    subtitle ?: " ",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Red,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.height(16.dp).testTag("home_status"),
+                )
+            }
             Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) { trailing() }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) { content() }
@@ -195,10 +233,11 @@ private fun AppScaffold(
 }
 
 @Composable
-private fun ToolbarText(glyph: String, label: String, tag: String, action: () -> Unit) {
-    Text(glyph, color = Accent, fontSize = if (glyph == "‹") 34.sp else 24.sp,
-        modifier = Modifier.size(44.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = label, onClick = action)
-            .testTag(tag).semantics { contentDescription = label }, textAlign = TextAlign.Center)
+private fun ToolbarButton(icon: ImageVector, label: String, tag: String, action: () -> Unit) {
+    Icon(icon, contentDescription = label, tint = Accent,
+        modifier = Modifier.size(44.dp).clip(CircleShape)
+            .clickable(role = Role.Button, onClickLabel = label, onClick = action)
+            .padding(10.dp).testTag(tag))
 }
 
 @Composable
@@ -221,27 +260,29 @@ private fun WelcomeScreen(model: AppViewModel) = AdaptiveContent("setup_welcome"
     }
     Spacer(Modifier.height(28.dp))
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SetupRow("새 가족 공간 만들기", "첫 기기에서 공간을 만들고 QR로 초대해요", "+", "setup_create") {
+        SetupRow("새 가족 공간 만들기", "첫 기기에서 공간을 만들고 QR로 초대해요", Icons.Default.AddCircle, "setup_create") {
             model.navigate(AppRoute.CREATE_SPACE)
         }
-        SetupRow("초대 QR로 참여하기", "가족 기기에 표시된 QR 코드를 스캔해요", "▦", "setup_join") {
+        SetupRow("초대 QR로 참여하기", "가족 기기에 표시된 QR 코드를 스캔해요", Icons.Default.QrCodeScanner, "setup_join") {
             model.navigate(AppRoute.JOIN_SPACE)
         }
     }
 }
 
 @Composable
-private fun SetupRow(title: String, subtitle: String, glyph: String, tag: String, onClick: () -> Unit) {
+private fun SetupRow(title: String, subtitle: String, icon: ImageVector, tag: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp), ambientColor = Color.Black.copy(.05f),
         spotColor = Color.Black.copy(.05f)).background(Color.White, RoundedCornerShape(20.dp))
         .clickable(onClick = onClick).testTag(tag).padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(glyph, color = Accent, fontSize = 30.sp, textAlign = TextAlign.Center, modifier = Modifier.width(44.dp))
+        Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(30.dp))
+        }
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(subtitle, fontSize = 13.sp, color = Secondary)
         }
-        Text("›", fontSize = 22.sp, color = Secondary.copy(.45f))
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Secondary.copy(.45f), modifier = Modifier.size(22.dp))
     }
 }
 
@@ -295,7 +336,10 @@ private fun JoinSpaceScreen(state: AppUiState, model: AppViewModel) {
             if (state.fixtureId != null) {
                 Box(Modifier.fillMaxWidth().height(300.dp).background(Color.Black, RoundedCornerShape(20.dp))
                     .testTag("qr_scanner_fixture"), contentAlignment = Alignment.Center) {
-                    Text("▦\n가족 초대 QR 스캐너", color = Color.White, textAlign = TextAlign.Center)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                        Text("가족 초대 QR 스캐너", color = Color.White, textAlign = TextAlign.Center)
+                    }
                 }
             } else {
                 QrScannerPreview(onCode = { raw ->
@@ -322,7 +366,7 @@ private fun JoinSpaceScreen(state: AppUiState, model: AppViewModel) {
         } else {
             Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(20.dp)).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("✓", fontSize = 44.sp, color = Green)
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Green, modifier = Modifier.size(44.dp))
                 Text("“${invite!!.spaceName}” 공간 초대를 확인했어요.", fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             }
@@ -362,7 +406,8 @@ private fun RoleCard(role: AppRole, color: Color, model: AppViewModel, modifier:
         .background(Color.White, RoundedCornerShape(18.dp)).border(1.dp, color.copy(.25f), RoundedCornerShape(18.dp))
         .clickable { model.selectRole(role) }.testTag(if (parent) "role_parent" else "role_child").padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(if (parent) "♙" else "☺", fontSize = 32.sp, color = color)
+        Icon(if (parent) Icons.Default.SupervisorAccount else Icons.Default.ChildCare,
+            contentDescription = null, tint = color, modifier = Modifier.size(32.dp))
         Spacer(Modifier.height(10.dp))
         Text(if (parent) "부모" else "자녀", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(3.dp))
@@ -373,15 +418,38 @@ private fun RoleCard(role: AppRole, color: Color, model: AppViewModel, modifier:
 
 @Composable
 private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveContent("parent_home") {
+    val voiceTitle = when (state.voiceState) {
+        VoiceState.REQUESTING_PERMISSION -> "권한 확인 중…"
+        VoiceState.RECORDING -> "녹음 중…"
+        VoiceState.DENIED -> "마이크 설정 필요"
+        VoiceState.SENT -> "전송했어요"
+        VoiceState.IDLE -> "목소리 전달"
+    }
+    val voiceIcon = when (state.voiceState) {
+        VoiceState.RECORDING -> Icons.Default.GraphicEq
+        VoiceState.DENIED -> Icons.Default.MicOff
+        VoiceState.SENT -> Icons.Default.CheckCircle
+        else -> Icons.Default.Mic
+    }
+    val voiceColor = when (state.voiceState) {
+        VoiceState.RECORDING -> Red
+        VoiceState.DENIED -> Color.Gray
+        VoiceState.SENT -> Green
+        else -> Orange
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HomeAction("조용히 알림", "◌", Secondary, "quiet_alert",
-            hint = "소리 없이 알림 화면만 상대 기기에 보여요", modifier = Modifier.weight(1f),
-            cooldownSeconds = state.sendCooldownRemainingSeconds,
+        HomeAction("조용히 알림", Icons.Default.NotificationsOff, Secondary, "quiet_alert",
+            hint = "탭하면 소리 없이 알리고, 5초간 누르면 상대 기기에 사이렌을 보내요", modifier = Modifier.weight(1f),
+            cooldownSeconds = 0,
             onTap = model::sendQuietTap, onPressStart = model::beginQuietHold, onPressEnd = model::endQuietHold)
-        HomeAction("띵동 알림", "●", Accent, "dingdong", "띵동 소리와 함께 알림 화면을 상대 기기에 보여요",
-            Modifier.weight(1f), state.sendCooldownRemainingSeconds, model::sendDingDong)
-        HomeAction("목소리 전달", "♩", Orange, "voice", "누르고 있는 동안 최대 15초 녹음해 손을 떼면 전송돼요",
-            Modifier.weight(1f), state.sendCooldownRemainingSeconds, { model.showVoice(true) })
+        HomeAction("띵동 알림", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 알림 화면을 상대 기기에 보여요",
+            Modifier.weight(1f), 0, model::sendDingDong)
+        HomeAction(voiceTitle, voiceIcon, voiceColor, "voice", "누르고 있는 동안 최대 15초 녹음해 손을 떼면 전송돼요",
+            Modifier.weight(1f), 0,
+            onTap = model::recordAccessibleVoice,
+            onPressStart = model::beginVoiceHold,
+            onPressEnd = model::endVoiceHold,
+            tapAfterPress = false)
     }
     Spacer(Modifier.height(18.dp))
     PresenceCard(state, model::toggleRecipient)
@@ -400,11 +468,11 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
 @Composable
 private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveContent("child_home") {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HomeAction("조용히 알림", "◌", Secondary, "quiet_alert",
-            "소리 없이 부모와 가족에게 호출을 보내요", Modifier.weight(1f),
+        HomeAction("조용히 알림", Icons.Default.NotificationsOff, Secondary, "quiet_alert",
+            "탭하면 소리 없이 알리고, 5초간 누르면 부모와 가족 기기에 사이렌을 보내요", Modifier.weight(1f),
             state.sendCooldownRemainingSeconds, model::sendQuietTap,
             model::beginQuietHold, model::endQuietHold)
-        HomeAction("띵동 알림", "●", Accent, "dingdong", "띵동 소리와 함께 부모와 가족에게 호출을 보내요",
+        HomeAction("띵동 알림", Icons.Default.NotificationsActive, Accent, "dingdong", "띵동 소리와 함께 부모와 가족에게 호출을 보내요",
             Modifier.weight(1f), state.sendCooldownRemainingSeconds, model::sendDingDong)
     }
     Spacer(Modifier.height(18.dp))
@@ -422,20 +490,25 @@ private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveCo
     }
     Spacer(Modifier.height(16.dp))
     OutlinedButton(onClick = model::playDingDong, modifier = Modifier.align(Alignment.CenterHorizontally)
-        .testTag("preview_dingdong")) { Text("🔊  띵동 소리 미리 듣기") }
+        .testTag("preview_dingdong")) {
+        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("띵동 소리 미리 듣기")
+    }
 }
 
 @Composable
 private fun HomeAction(
-    title: String, glyph: String, color: Color, tag: String, hint: String, modifier: Modifier = Modifier,
+    title: String, icon: ImageVector, color: Color, tag: String, hint: String, modifier: Modifier = Modifier,
     cooldownSeconds: Int = 0,
     onTap: () -> Unit, onPressStart: (() -> Unit)? = null, onPressEnd: (() -> Unit)? = null,
+    tapAfterPress: Boolean = true,
 ) {
     val enabled = cooldownSeconds <= 0
     val gesture = when {
         !enabled -> Modifier
         onPressStart != null -> Modifier.pointerInput(Unit) {
-            detectTapGestures(onTap = { onTap() }, onPress = {
+            detectTapGestures(onTap = { if (tapAfterPress) onTap() }, onPress = {
                 onPressStart(); tryAwaitRelease(); onPressEnd?.invoke()
             })
         }
@@ -448,7 +521,7 @@ private fun HomeAction(
             if (enabled) onClick(label = hint) { onTap(); true } else disabled()
         }.padding(horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(glyph, color = if (enabled) color else color.copy(.35f), fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
+        Icon(icon, contentDescription = null, tint = if (enabled) color else color.copy(.35f), modifier = Modifier.size(25.dp))
         Spacer(Modifier.height(7.dp))
         Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
             color = if (enabled) Color.Unspecified else Secondary)
@@ -584,6 +657,7 @@ private fun CallHistoryList(entries: List<CallHistoryEntry>, onReplayVoice: (Cal
 @Composable
 private fun CallHistoryRow(entry: CallHistoryEntry, onReplayVoice: (CallHistoryEntry) -> Unit) {
     val color = when {
+        entry.kind == CallEvent.Kind.Siren -> Red
         entry.kind == CallEvent.Kind.VoiceMessage -> Orange
         entry.kind == CallEvent.Kind.DingDong -> Accent
         else -> Secondary
@@ -592,6 +666,7 @@ private fun CallHistoryRow(entry: CallHistoryEntry, onReplayVoice: (CallHistoryE
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(
             when {
+                entry.kind == CallEvent.Kind.Siren -> Icons.Default.Warning
                 entry.kind == CallEvent.Kind.VoiceMessage -> Icons.Default.GraphicEq
                 entry.direction == CallHistoryEntry.Direction.SENT -> Icons.Default.ArrowCircleUp
                 else -> Icons.Default.ArrowCircleDown
@@ -708,8 +783,14 @@ private fun VoiceDialog(state: VoiceState, cooldownSeconds: Int, model: AppViewM
                     }
                 }, contentAlignment = Alignment.Center) {
                 Box(Modifier.requiredSize(110.dp).background(color, CircleShape), contentAlignment = Alignment.Center) {
-                    Text(if (state == VoiceState.RECORDING) "≋" else if (state == VoiceState.DENIED) "∅" else "♩",
-                        fontSize = 40.sp, color = Color.White)
+                    Icon(
+                        if (state == VoiceState.RECORDING) Icons.Default.GraphicEq
+                        else if (state == VoiceState.DENIED) Icons.Default.MicOff
+                        else Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp),
+                    )
                 }
             }
             Spacer(Modifier.height(28.dp))
@@ -756,11 +837,17 @@ private fun IncomingDialog(event: IncomingUi, model: AppViewModel) {
                 Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().fillMaxHeight().padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(Modifier.weight(1f))
-                    val color = when (event.kind) { IncomingKind.VOICE_MESSAGE -> Orange; IncomingKind.QUIET_ALERT -> Secondary; else -> Accent }
+                    val color = when (event.kind) {
+                        IncomingKind.VOICE_MESSAGE -> Orange
+                        IncomingKind.QUIET_ALERT -> Secondary
+                        IncomingKind.SIREN -> Red
+                        IncomingKind.DING_DONG -> Accent
+                    }
                     BellGlyph(88.dp, color)
                     Spacer(Modifier.height(28.dp))
                     val title = when (event.kind) {
                         IncomingKind.QUIET_ALERT -> "조용한 호출"
+                        IncomingKind.SIREN -> "사이렌 호출"
                         IncomingKind.DING_DONG -> "띵동 호출"
                         IncomingKind.VOICE_MESSAGE -> "음성 메시지"
                     }

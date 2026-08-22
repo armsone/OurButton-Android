@@ -16,7 +16,7 @@ class CallEventCodingTest {
 
     @Test
     fun dingDongAndQuietAlertRoundTrip() {
-        for (kind in listOf(CallEvent.Kind.DingDong, CallEvent.Kind.QuietAlert)) {
+        for (kind in listOf(CallEvent.Kind.DingDong, CallEvent.Kind.QuietAlert, CallEvent.Kind.Siren)) {
             val event = CallEvent(kind = kind, spaceID = spaceID, senderName = "엄마")
             val decoded = CallEventCoder.decode(CallEventCoder.encode(event))
             assertEquals(event.id, decoded.id)
@@ -27,6 +27,7 @@ class CallEventCodingTest {
             assertTrue(Duration.between(decoded.sentAt, event.sentAt).abs() < Duration.ofSeconds(1))
         }
         assertFalse(CallEvent.Kind.QuietAlert.title == CallEvent.Kind.DingDong.title)
+        assertEquals("siren", CallEvent.Kind.Siren.rawValue)
     }
 
     @Test

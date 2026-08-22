@@ -18,20 +18,25 @@ import com.armsone.button.R
 import com.armsone.button.MainActivity
 
 /** Posts app-owned call notifications with intentionally separate sound-policy channels. */
-class NotificationHelper(private val context: Context, dingDongSound: Uri? = null) {
+class NotificationHelper(
+    private val context: Context,
+    dingDongSound: Uri? = null,
+    sirenSound: Uri? = null,
+) {
     companion object {
         const val QUIET_CHANNEL_ID = "family_calls_quiet_v1"
         const val DING_DONG_CHANNEL_ID = "family_calls_ding_dong_v2"
+        const val SIREN_CHANNEL_ID = "family_calls_siren_v1"
         const val VOICE_CHANNEL_ID = "family_calls_voice_v1"
         private const val CHANNEL_GROUP_ID = "family_calls"
         private const val NOTIFICATION_TAG = "family-call"
     }
 
     init {
-        createChannels(dingDongSound)
+        createChannels(dingDongSound, sirenSound)
     }
 
-    fun createChannels(dingDongSound: Uri? = null) {
+    fun createChannels(dingDongSound: Uri? = null, sirenSound: Uri? = null) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannelGroup(
@@ -75,13 +80,32 @@ class NotificationHelper(private val context: Context, dingDongSound: Uri? = nul
             description = "가족의 음성 메시지가 도착하면 알려요."
             enableVibration(false)
         }
+        val siren = NotificationChannel(
+            SIREN_CHANNEL_ID,
+            "사이렌 알림",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            group = CHANNEL_GROUP_ID
+            description = "긴급 사이렌 소리와 함께 가족 호출을 알려요."
+            if (sirenSound != null) {
+                setSound(
+                    sirenSound,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+            }
+            enableVibration(false)
+        }
         // Android channel sound/importance is immutable after first creation. New behavior
         // therefore requires a new versioned channel ID, never mutation of these channels.
-        manager.createNotificationChannels(listOf(quiet, dingDong, voice))
+        manager.createNotificationChannels(listOf(quiet, dingDong, voice, siren))
     }
 
     fun notify(event: CallEvent): Boolean {
         if (event.kind != CallEvent.Kind.QuietAlert &&
+            event.kind != CallEvent.Kind.Siren &&
             event.kind != CallEvent.Kind.DingDong &&
             event.kind != CallEvent.Kind.VoiceMessage
         ) {
@@ -93,6 +117,7 @@ class NotificationHelper(private val context: Context, dingDongSound: Uri? = nul
         ) return false
 
         val dingDong = event.kind == CallEvent.Kind.DingDong
+        val siren = event.kind == CallEvent.Kind.Siren
         val voice = event.kind == CallEvent.Kind.VoiceMessage
         val contentIntent = PendingIntent.getActivity(
             context,
@@ -105,6 +130,7 @@ class NotificationHelper(private val context: Context, dingDongSound: Uri? = nul
         val notification = NotificationCompat.Builder(
             context,
             when {
+                siren -> SIREN_CHANNEL_ID
                 dingDong -> DING_DONG_CHANNEL_ID
                 voice -> VOICE_CHANNEL_ID
                 else -> QUIET_CHANNEL_ID
@@ -113,16 +139,21 @@ class NotificationHelper(private val context: Context, dingDongSound: Uri? = nul
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("버튼")
             .setSubText(when {
+                siren -> "사이렌 알림"
                 dingDong -> "띵동 알림"
                 voice -> "음성 메시지"
                 else -> "조용히 알림"
             })
-            .setContentText(if (voice) "${event.senderName}님의 음성 메시지가 도착했어요." else "${event.senderName}님이 불렀어요.")
+            .setContentText(when {
+                voice -> "${event.senderName}님의 음성 메시지가 도착했어요."
+                siren -> "${event.senderName}님의 긴급 사이렌 호출이 왔어요."
+                else -> "${event.senderName}님이 불렀어요."
+            })
             .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            .setSilent(!dingDong && !voice)
+            .setSilent(!siren && !dingDong && !voice)
             .setGroup("family-call-${event.spaceID}")
             .build()
 

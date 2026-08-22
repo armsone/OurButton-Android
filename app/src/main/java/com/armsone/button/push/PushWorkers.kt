@@ -8,6 +8,7 @@ import com.armsone.button.data.BackendConfiguration
 import com.armsone.button.data.BackendException
 import com.armsone.button.data.CallHistoryStore
 import com.armsone.button.data.HttpBackendClient
+import com.armsone.button.data.PendingVoiceStore
 import com.armsone.button.model.CallEvent
 import com.armsone.button.platform.NotificationHelper
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -99,9 +100,13 @@ class PushDeliveryWorker(
         }
 
         if (!RemoteEventRouter.route(event)) {
+            if (event.kind == CallEvent.Kind.VoiceMessage) {
+                PendingVoiceStore(applicationContext).record(event.id)
+            }
             NotificationHelper(
                 applicationContext,
                 Uri.parse("android.resource://${applicationContext.packageName}/${R.raw.dingdong3}"),
+                Uri.parse("android.resource://${applicationContext.packageName}/${R.raw.siren}"),
             ).notify(event)
         }
         return Result.success()

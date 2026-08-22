@@ -8,6 +8,22 @@ import java.io.File
 import java.time.Instant
 import java.util.UUID
 
+class PendingVoiceStore(context: Context) {
+    private val preferences = context.getSharedPreferences("button_pending_voice", Context.MODE_PRIVATE)
+
+    fun record(eventID: UUID) {
+        preferences.edit().putString("eventID", eventID.toString()).apply()
+    }
+
+    fun take(): UUID? {
+        val value = preferences.getString("eventID", null)
+        preferences.edit().remove("eventID").apply()
+        return value?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+
+    fun clear() = preferences.edit().clear().apply()
+}
+
 data class CallHistoryEntry(
     val id: UUID,
     val spaceID: UUID,
@@ -243,6 +259,7 @@ class CallHistoryStore(
         const val MAX_VOICE_ENTRIES = 10
         private val RECORDABLE_KINDS = setOf(
             CallEvent.Kind.QuietAlert,
+            CallEvent.Kind.Siren,
             CallEvent.Kind.DingDong,
             CallEvent.Kind.VoiceMessage,
         )

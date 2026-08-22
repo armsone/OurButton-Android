@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.armsone.button.data.CallHistoryEntry
 import com.armsone.button.data.CallHistoryStore
+import com.armsone.button.data.PendingVoiceStore
 import com.armsone.button.model.CallEvent
 import com.armsone.button.model.FamilySpace
 import com.armsone.button.model.QRInvite
@@ -24,7 +25,7 @@ enum class AppPhase { SETUP, ROLE_SELECTION, HOME }
 enum class AppRole { PARENT, CHILD }
 enum class AppRoute { WELCOME, CREATE_SPACE, JOIN_SPACE, SETTINGS }
 enum class TransportUiStatus { IDLE, SEARCHING, CONNECTED, DEMO }
-enum class IncomingKind { QUIET_ALERT, DING_DONG, VOICE_MESSAGE }
+enum class IncomingKind { QUIET_ALERT, SIREN, DING_DONG, VOICE_MESSAGE }
 enum class VoiceState { IDLE, REQUESTING_PERMISSION, DENIED, RECORDING, SENT }
 enum class CallActivityKind { SENT, ACKNOWLEDGED }
 
@@ -74,6 +75,7 @@ data class AppUiState(
     val callHistory: List<CallHistoryEntry> = emptyList(),
     val errorMessage: String? = null,
     val quietHoldTriggered: Boolean = false,
+    val quietHoldRemainingSeconds: Int = 0,
     val sendCooldownRemainingSeconds: Int = 0,
     val notificationStatus: String = "허용 필요",
     val pushStatus: String = "요청하지 않음",
@@ -122,6 +124,7 @@ class AppViewModel(
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, NoOpHardwareGateway)
     private val prefs = application.getSharedPreferences("button_state", Context.MODE_PRIVATE)
+    private val pendingVoiceStore = PendingVoiceStore(application)
     private val _uiState = MutableStateFlow(loadState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
@@ -174,16 +177,24 @@ class AppViewModel(
     }
 
     fun selectRole(role: AppRole) {
+        if (role == AppRole.PARENT) {
+            cooldownJob?.cancel()
+            sendCooldown.reset()
+        }
         _uiState.update {
             val own = PresenceUi("current", it.displayName.ifEmpty { "이 기기" }, role, true)
-            it.copy(phase = AppPhase.HOME, role = role, members = listOf(own))
+            it.copy(
+                phase = AppPhase.HOME,
+                role = role,
+                members = listOf(own),
+                sendCooldownRemainingSeconds = if (role == AppRole.PARENT) 0 else it.sendCooldownRemainingSeconds,
+            )
         }
         persist()
     }
 
     fun showInvite(show: Boolean) = _uiState.update { it.copy(showInvite = show) }
     fun showVoice(show: Boolean) {
-        if (show && sendCooldown.isActive) return
         _uiState.update { it.copy(showVoice = show, voiceState = VoiceState.IDLE) }
     }
     fun clearCallActivity() = _uiState.update { it.copy(callActivity = null) }
@@ -195,18 +206,23 @@ class AppViewModel(
 
     fun beginQuietHold() {
         quietHoldJob?.cancel()
-        _uiState.update { it.copy(quietHoldTriggered = false) }
+        _uiState.update { it.copy(quietHoldTriggered = false, quietHoldRemainingSeconds = 5) }
         quietHoldJob = viewModelScope.launch {
-            delay(5_000)
+            for (remaining in 4 downTo 1) {
+                delay(1_000)
+                _uiState.update { it.copy(quietHoldRemainingSeconds = remaining) }
+            }
+            delay(1_000)
             suppressNextQuietTap = true
-            hardware.playSiren()
-            _uiState.update { it.copy(quietHoldTriggered = true) }
+            sendCall(IncomingKind.SIREN)
+            _uiState.update { it.copy(quietHoldTriggered = true, quietHoldRemainingSeconds = 0) }
         }
     }
 
     fun endQuietHold() {
         quietHoldJob?.cancel()
         quietHoldJob = null
+        _uiState.update { it.copy(quietHoldRemainingSeconds = 0) }
     }
 
     fun sendQuietTap() {
@@ -219,8 +235,10 @@ class AppViewModel(
     }
 
     fun beginVoiceHold() {
-        if (_uiState.value.voiceState == VoiceState.DENIED) return
-        if (sendCooldown.isActive) return
+        if (_uiState.value.voiceState == VoiceState.DENIED) {
+            hardware.openMicrophoneSettings()
+            return
+        }
         hardware.beginVoiceRecording(15, { state ->
             _uiState.update { it.copy(voiceState = state) }
         }) { data -> finishVoice(data) }
@@ -232,7 +250,9 @@ class AppViewModel(
     }
 
     fun endVoiceHold() {
-        if (_uiState.value.voiceState != VoiceState.RECORDING) return
+        if (_uiState.value.voiceState != VoiceState.RECORDING &&
+            _uiState.value.voiceState != VoiceState.REQUESTING_PERMISSION
+        ) return
         voiceLimitJob?.cancel()
         hardware.stopVoiceRecording()
     }
@@ -322,6 +342,7 @@ class AppViewModel(
         memberExpiryJobs.values.forEach(Job::cancel)
         memberExpiryJobs.clear()
         historyStore.clear()
+        pendingVoiceStore.clear()
         prefs.edit().clear().apply()
         _uiState.value = AppUiState()
     }
@@ -398,7 +419,15 @@ class AppViewModel(
                 pushStatus = hardware.pushStatus(),
                 serverStatus = hardware.serverStatus(),
                 callHistory = historyForCurrentSpace(),
+                voiceState = if (it.voiceState == VoiceState.DENIED) VoiceState.IDLE else it.voiceState,
             )
+        }
+        pendingVoiceStore.take()?.let { eventID ->
+            historyStore.entries.firstOrNull {
+                it.id == eventID &&
+                    it.direction == CallHistoryEntry.Direction.RECEIVED &&
+                    Instant.now().epochSecond - it.date.epochSecond <= 600
+            }?.let(historyStore::voiceData)?.let(hardware::playVoice)
         }
     }
 
@@ -442,6 +471,12 @@ class AppViewModel(
                 transportStatus = TransportUiStatus.IDLE, connectedCount = 0)
             "parent_home_searching" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 transportStatus = TransportUiStatus.SEARCHING, connectedCount = 0)
+            "parent_home_voice_recording" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                voiceState = VoiceState.RECORDING)
+            "parent_home_voice_sent" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                voiceState = VoiceState.SENT)
+            "parent_home_siren_countdown" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
+                quietHoldRemainingSeconds = 3)
             "child_home" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD)
             "child_home_targeted" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 selectedTargetID = FIXTURE_CHILD_ID)
@@ -453,6 +488,8 @@ class AppViewModel(
                 callHistory = fixtureHistory())
             "child_home_demo" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
                 isDemoMode = true, transportStatus = TransportUiStatus.DEMO)
+            "child_home_siren_countdown" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD,
+                quietHoldRemainingSeconds = 3)
             "invite_qr" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showInvite = true)
             "voice_idle" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true)
             "voice_requesting" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, showVoice = true, voiceState = VoiceState.REQUESTING_PERMISSION)
@@ -462,6 +499,7 @@ class AppViewModel(
             "incoming_quiet" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD, incoming = IncomingUi(senderName = "엄마", kind = IncomingKind.QUIET_ALERT))
             "incoming_dingdong" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD, incoming = IncomingUi(senderName = "엄마", kind = IncomingKind.DING_DONG))
             "incoming_voice" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD, incoming = IncomingUi(senderName = "엄마", kind = IncomingKind.VOICE_MESSAGE))
+            "incoming_siren" -> base.copy(phase = AppPhase.HOME, role = AppRole.CHILD, incoming = IncomingUi(senderName = "엄마", kind = IncomingKind.SIREN))
             "settings" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT, route = AppRoute.SETTINGS)
             "settings_notification_denied" -> base.copy(phase = AppPhase.HOME, role = AppRole.PARENT,
                 route = AppRoute.SETTINGS, notificationStatus = "차단됨")
@@ -488,6 +526,14 @@ class AppViewModel(
     }
 
     private fun fixtureHistory(): List<CallHistoryEntry> = listOf(
+        CallHistoryEntry(
+            id = UUID.fromString("33333333-3333-3333-3333-333333333333"),
+            spaceID = UUID.fromString("12345678-1234-1234-1234-123456789abc"),
+            kind = CallEvent.Kind.Siren,
+            direction = CallHistoryEntry.Direction.RECEIVED,
+            counterpartName = "첫째",
+            date = Instant.parse("2026-08-21T06:05:00Z"),
+        ),
         CallHistoryEntry(
             id = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             spaceID = UUID.fromString("12345678-1234-1234-1234-123456789abc"),
@@ -551,11 +597,13 @@ class AppViewModel(
     }
 
     private fun sendCall(kind: IncomingKind, voice: ByteArray? = null) {
-        if (!sendCooldown.beginIfAvailable()) {
-            showError("잠시만요. ${sendCooldown.remainingSeconds()}초 뒤에 다시 보낼 수 있어요.")
-            return
+        if (_uiState.value.role == AppRole.CHILD) {
+            if (!sendCooldown.beginIfAvailable()) {
+                showError("잠시만요. ${sendCooldown.remainingSeconds()}초 뒤에 다시 보낼 수 있어요.")
+                return
+            }
+            startCooldownUpdates()
         }
-        startCooldownUpdates()
         val state = _uiState.value
         val target = state.members.firstOrNull { it.id == state.selectedTargetID && !it.isCurrentDevice }
         if (state.isDemoMode) {
@@ -585,6 +633,7 @@ class AppViewModel(
         val destination = target?.name?.let { "${it}님에게" } ?: "모두에게"
         val title = when (kind) {
             IncomingKind.QUIET_ALERT -> "조용한 호출"
+            IncomingKind.SIREN -> "사이렌 호출"
             IncomingKind.DING_DONG -> "띵동 호출"
             IncomingKind.VOICE_MESSAGE -> "음성 메시지"
         }
@@ -620,6 +669,7 @@ class AppViewModel(
 
     private fun IncomingKind.toCallKind(): CallEvent.Kind = when (this) {
         IncomingKind.QUIET_ALERT -> CallEvent.Kind.QuietAlert
+        IncomingKind.SIREN -> CallEvent.Kind.Siren
         IncomingKind.DING_DONG -> CallEvent.Kind.DingDong
         IncomingKind.VOICE_MESSAGE -> CallEvent.Kind.VoiceMessage
     }
@@ -655,7 +705,14 @@ class AppViewModel(
         incomingDismissJob = null
         hardware.stopVoiceRecording()
         hardware.stopPlayback()
-        _uiState.update { it.copy(incoming = null, quietHoldTriggered = false, showVoice = false) }
+        _uiState.update {
+            it.copy(
+                incoming = null,
+                quietHoldTriggered = false,
+                quietHoldRemainingSeconds = 0,
+                showVoice = false,
+            )
+        }
     }
 
 }

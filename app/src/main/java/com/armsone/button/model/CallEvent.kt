@@ -24,6 +24,7 @@ class CallEvent(
 ) {
     enum class Kind(val rawValue: String, val title: String) {
         QuietAlert("quietAlert", "조용한 호출"),
+        Siren("siren", "사이렌 호출"),
         DingDong("dingDong", "띵동 호출"),
         VoiceMessage("voiceMessage", "음성 메시지"),
         Acknowledge("acknowledge", "확인"),

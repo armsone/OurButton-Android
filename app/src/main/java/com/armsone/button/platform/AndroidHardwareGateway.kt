@@ -15,6 +15,7 @@ import com.armsone.button.R
 import com.armsone.button.data.BackendConfiguration
 import com.armsone.button.data.CallHistoryStore
 import com.armsone.button.data.HttpBackendClient
+import com.armsone.button.data.PendingVoiceStore
 import com.armsone.button.model.CallEvent
 import com.armsone.button.model.FamilyRole
 import com.armsone.button.model.FamilySpace
@@ -65,7 +66,9 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     private val notifications = NotificationHelper(
         activity,
         Uri.parse("android.resource://${activity.packageName}/${R.raw.dingdong3}"),
+        Uri.parse("android.resource://${activity.packageName}/${R.raw.siren}"),
     )
+    private val pendingVoiceStore = PendingVoiceStore(activity)
     private val backendConfiguration = BackendConfiguration.load(activity)
     private val backend = HttpBackendClient(backendConfiguration)
     private val prefs = activity.getSharedPreferences("button_hardware", Context.MODE_PRIVATE)
@@ -228,6 +231,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
     ) {
         val callKind = when (kind) {
             IncomingKind.QUIET_ALERT -> CallEvent.Kind.QuietAlert
+            IncomingKind.SIREN -> CallEvent.Kind.Siren
             IncomingKind.DING_DONG -> CallEvent.Kind.DingDong
             IncomingKind.VOICE_MESSAGE -> CallEvent.Kind.VoiceMessage
         }
@@ -369,6 +373,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
         if (event.targetID != null && event.targetID != deviceID) return
 
         if (event.kind == CallEvent.Kind.QuietAlert ||
+            event.kind == CallEvent.Kind.Siren ||
             event.kind == CallEvent.Kind.DingDong ||
             event.kind == CallEvent.Kind.VoiceMessage
         ) {
@@ -380,16 +385,17 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                 onAcknowledge(event.senderName, event.ackFor?.toString())
             }
             CallEvent.Kind.Presence -> Unit
-            CallEvent.Kind.QuietAlert, CallEvent.Kind.DingDong, CallEvent.Kind.VoiceMessage -> {
+            CallEvent.Kind.QuietAlert, CallEvent.Kind.Siren, CallEvent.Kind.DingDong, CallEvent.Kind.VoiceMessage -> {
                 flash.flash()
-                if (event.kind == CallEvent.Kind.DingDong) sound.play()
-                if (event.kind == CallEvent.Kind.VoiceMessage) {
+                val inForeground = activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                if (inForeground && event.kind == CallEvent.Kind.Siren) sound.playSiren()
+                if (inForeground && event.kind == CallEvent.Kind.DingDong) sound.play()
+                if (inForeground && event.kind == CallEvent.Kind.VoiceMessage) {
                     event.voiceData?.let {
                         lastVoiceData = it
                         voicePlayer.play(it)
                     }
                 }
-                val inForeground = activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
                 if (inForeground) {
                     val incoming = IncomingUi(
                         id = event.id.toString(),
@@ -397,6 +403,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                         senderID = event.senderID?.toString(),
                         kind = when (event.kind) {
                             CallEvent.Kind.QuietAlert -> IncomingKind.QUIET_ALERT
+                            CallEvent.Kind.Siren -> IncomingKind.SIREN
                             CallEvent.Kind.DingDong -> IncomingKind.DING_DONG
                             else -> IncomingKind.VOICE_MESSAGE
                         },
@@ -409,6 +416,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                     )
                     activity.runOnUiThread { onIncoming(incoming) }
                 } else {
+                    if (event.kind == CallEvent.Kind.VoiceMessage) pendingVoiceStore.record(event.id)
                     notifications.notify(event)
                 }
             }
