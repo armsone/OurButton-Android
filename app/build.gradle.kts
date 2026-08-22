@@ -11,8 +11,9 @@ android {
         applicationId = "com.armsone.button"
         minSdk = 26
         targetSdk = 37
-        versionCode = 21
-        versionName = "1.2.3"
+        versionCode = 337417
+        versionName = "2.0.0"
+        buildConfigField("String", "BUILD_NUMBER", "\"202608230737\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -44,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

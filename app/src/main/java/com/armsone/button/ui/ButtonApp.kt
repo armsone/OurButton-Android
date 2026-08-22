@@ -2,6 +2,7 @@
 
 package com.armsone.button.ui
 
+import com.armsone.button.BuildConfig
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -263,11 +264,11 @@ private fun AppScaffold(
         val packageInfo = remember {
             runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
         }
-        Text("버전 ${packageInfo?.versionName ?: "-"} · 빌드 ${packageInfo?.longVersionCode ?: "-"}",
+        Text("버전 ${packageInfo?.versionName ?: "-"} · 빌드 ${BuildConfig.BUILD_NUMBER}",
             fontSize = 11.sp, color = Secondary, fontFamily = FontFamily.Monospace,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().background(EnamelWarm.copy(alpha = .86f)).padding(vertical = 5.dp)
-                .semantics { contentDescription = "버전 ${packageInfo?.versionName ?: "-"}, 빌드 ${packageInfo?.longVersionCode ?: "-"}" })
+                .semantics { contentDescription = "버전 ${packageInfo?.versionName ?: "-"}, 빌드 ${BuildConfig.BUILD_NUMBER}" })
     }
 }
 
