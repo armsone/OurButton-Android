@@ -108,6 +108,8 @@ import com.armsone.button.data.CallHistoryEntry
 import com.armsone.button.model.CallEvent
 import com.armsone.button.state.AppPhase
 import com.armsone.button.state.AppRole
+import com.armsone.button.update.DirectUpdateManager
+import com.armsone.button.update.DirectUpdateSettings
 import com.armsone.button.state.AppRoute
 import com.armsone.button.state.AppUiState
 import com.armsone.button.state.AppViewModel
@@ -957,6 +959,8 @@ private fun IncomingDialog(event: IncomingUi, model: AppViewModel) {
 @Composable
 private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
     var confirmLeave by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val updateManager = remember(context) { DirectUpdateManager.get(context) }
     AdaptiveContent("settings") {
         SettingsSection("가족 공간") {
             SettingsValue("이름", state.spaceName)
@@ -1005,6 +1009,11 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
         }
         Text("FCM을 켜면 같은 가족 공간의 원격 호출을 NAS 서버에서 안전하게 받아요. iPhone은 APNs, Android는 FCM을 사용하며 둘 다 같은 호출 기록과 대상 선택을 공유해요.",
             fontSize = 12.sp, color = Secondary, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        Spacer(Modifier.height(18.dp))
+        SettingsHeader("앱 업데이트", Icons.Default.ArrowCircleDown)
+        SettingsSection(null) {
+            DirectUpdateSettings(updateManager)
+        }
     }
     if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false },
         title = { Text("공간을 나가면 이 기기의 설정이 초기화돼요.") },

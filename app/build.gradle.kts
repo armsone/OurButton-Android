@@ -11,9 +11,9 @@ android {
         applicationId = "com.armsone.button"
         minSdk = 26
         targetSdk = 37
-        versionCode = 337417
-        versionName = "2.0.0"
-        buildConfigField("String", "BUILD_NUMBER", "\"202608230737\"")
+        versionCode = 340540
+        versionName = "2.0.1"
+        buildConfigField("String", "BUILD_NUMBER", "\"202608251140\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

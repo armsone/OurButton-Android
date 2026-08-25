@@ -2,6 +2,8 @@
 
 Android phone/tablet counterpart to the iOS `버튼` family-call app. It includes the Compose UI/state catalog, iOS-compatible QR/JSON/BLE codecs, real BLE central/peripheral transport, audio/torch/recording/notification integrations, APNs-parallel FCM receiving through the shared HTTP backend, and 2×2 parent/child widgets. Full visual parity is not claimed because the iOS project has no deterministic state fixture catalog for paired capture.
 
+Current app version is `2.0.1`, versionCode `340540`, display build `202608251140`. Settings can automatically or manually check and download the allowed signed APK from the app's official GitHub Releases channel before handing it to Android's installer.
+
 ## Build and test
 
 ```bash

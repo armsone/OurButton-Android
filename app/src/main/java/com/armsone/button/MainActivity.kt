@@ -12,6 +12,7 @@ import androidx.lifecycle.Lifecycle
 import com.armsone.button.platform.AndroidHardwareGateway
 import com.armsone.button.state.AppViewModel
 import com.armsone.button.ui.ButtonApp
+import com.armsone.button.update.DirectUpdateManager
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hardware = AndroidHardwareGateway(this)
+        DirectUpdateManager.get(applicationContext).start()
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
