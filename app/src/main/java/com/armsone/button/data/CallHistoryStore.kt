@@ -189,7 +189,7 @@ class CallHistoryStore(
 
     private fun trimIfNeeded() {
         while (mutableEntries.size > maxEntries.coerceAtLeast(1)) {
-            removeVoiceFile(mutableEntries.removeLast())
+            removeVoiceFile(mutableEntries.removeAt(mutableEntries.lastIndex))
         }
         val keepVoiceCount = maxVoiceEntries.coerceAtLeast(0)
         mutableEntries.indices.filter { mutableEntries[it].voiceFileName != null }
