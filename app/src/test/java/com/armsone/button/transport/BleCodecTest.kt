@@ -53,7 +53,7 @@ class BleCodecTest {
         val reassembler = BleReassembler()
         val start = Instant.parse("2026-01-01T00:00:00Z")
         fragments.dropLast(1).forEach { assertNull(reassembler.append(it, "peer", start)) }
-        assertNull(reassembler.append(fragments.last(), "peer", start.plusSeconds(15)))
+        assertNull(reassembler.append(fragments.last(), "peer", start.plusSeconds(30)))
     }
 
     @Test
@@ -66,4 +66,56 @@ class BleCodecTest {
         val conflicting = fragments[1].clone().also { it[8] = (it[8].toInt() + 1).toByte() }
         assertNull(reassembler.append(conflicting, "peer"))
     }
+
+    @Test
+    fun boundedVoiceFallbackPreservesPayloadAndTargets() {
+        val target = UUID.randomUUID()
+        val voice = ByteArray(32 * 1024) { (it % 251).toByte() }
+        val event = CallEvent(
+            CallEvent.Kind.VoiceMessage,
+            spaceID = UUID.randomUUID(),
+            senderName = "김부장",
+            targetID = target,
+            voiceData = voice,
+        )
+        assertTrue(BleCodec.supports(event))
+        val fragments = BleCodec.fragments(event, secret, maximumPayloadLength = 160)
+        val reassembler = BleReassembler()
+        var combined: ByteArray? = null
+        fragments.forEach { fragment ->
+            combined = reassembler.append(fragment, peerID = "android-peer") ?: combined
+        }
+        val decoded = BleCodec.open(requireNotNull(combined), secret)
+        assertEquals(target, decoded.targetID)
+        assertTrue(decoded.voiceData!!.contentEquals(voice))
+
+        val tooLarge = event.copyForVoice(ByteArray(BleCodec.MAX_BLE_VOICE_BYTES + 1))
+        assertTrue(!BleCodec.supports(tooLarge))
+    }
+
+    @Test
+    fun peerRoutesCoverEitherConnectionDirectionWithoutDuplicates() {
+        assertEquals(
+            BlePeerRoutes(notifyAddresses = setOf("peer-a"), writeAddresses = setOf("peer-b")),
+            blePeerRoutes(
+                subscribedAddresses = setOf("peer-a"),
+                connectedAddresses = setOf("peer-a", "peer-b"),
+            ),
+        )
+        assertEquals(
+            BlePeerRoutes(notifyAddresses = emptySet(), writeAddresses = setOf("peer-a")),
+            blePeerRoutes(emptySet(), setOf("peer-a")),
+        )
+    }
+
+    private fun CallEvent.copyForVoice(data: ByteArray) = CallEvent(
+        kind = kind,
+        spaceID = spaceID,
+        senderName = senderName,
+        senderID = senderID,
+        senderRole = senderRole,
+        targetID = targetID,
+        targetIDs = targetIDs,
+        voiceData = data,
+    )
 }

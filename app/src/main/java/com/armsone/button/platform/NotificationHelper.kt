@@ -165,11 +165,14 @@ class NotificationHelper(
         return true
     }
 
-    fun clearDeliveredCalls() {
+    fun clearDeliveredCalls(spaceID: java.util.UUID? = null) {
         if (Build.VERSION.SDK_INT >= 23) {
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.activeNotifications
-                .filter { it.tag == NOTIFICATION_TAG }
+                .filter { notification ->
+                    notification.tag == NOTIFICATION_TAG &&
+                        (spaceID == null || notification.notification.group == "family-call-$spaceID")
+                }
                 .forEach { manager.cancel(it.tag, it.id) }
         }
     }

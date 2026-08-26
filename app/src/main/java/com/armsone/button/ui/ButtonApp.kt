@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package com.armsone.button.ui
 
@@ -10,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -36,9 +40,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -73,6 +79,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -99,6 +106,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.TouchApp
@@ -110,6 +118,9 @@ import com.armsone.button.state.AppPhase
 import com.armsone.button.state.AppRole
 import com.armsone.button.update.DirectUpdateManager
 import com.armsone.button.update.DirectUpdateSettings
+import com.armsone.button.update.SpaceHubUpdateAction
+import com.armsone.button.update.findActivity
+import com.armsone.button.update.spaceHubUpdatePresentation
 import com.armsone.button.state.AppRoute
 import com.armsone.button.state.AppUiState
 import com.armsone.button.state.AppViewModel
@@ -119,6 +130,16 @@ import com.armsone.button.state.IncomingKind
 import com.armsone.button.state.IncomingUi
 import com.armsone.button.state.InviteUi
 import com.armsone.button.state.PresenceUi
+import com.armsone.button.push.NotificationMuteSyncStatus
+import com.armsone.button.state.presenceAccessibilityDescription
+import com.armsone.button.state.presenceLiveText
+import com.armsone.button.state.presenceNotificationText
+import com.armsone.button.state.presenceColumnCount
+import com.armsone.button.state.presenceCompactStatusText
+import com.armsone.button.state.roleLabel
+import com.armsone.button.state.spaceSelectionSubtitle
+import com.armsone.button.state.visibleMemberName
+import com.armsone.button.state.memberNameFontSizeSp
 import com.armsone.button.state.TransportUiStatus
 import com.armsone.button.state.VoiceState
 import com.google.zxing.BarcodeFormat
@@ -129,6 +150,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import android.content.res.Configuration
 
 private val Accent = Color(0xFF526D80)
 private val Grouped = Color(0xFFF7F1E8)
@@ -171,8 +193,10 @@ fun ButtonApp(model: AppViewModel) {
             AppScaffold(title = titleFor(state), titleIcon = titleIconFor(state), subtitle = homeStatusFor(state), leading = {
                 when {
                     state.route != AppRoute.WELCOME -> ToolbarButton(Icons.Default.ArrowBackIosNew, "뒤로", "nav_back") { model.back() }
-                    state.phase == AppPhase.HOME && state.role == AppRole.PARENT ->
-                        ToolbarButton(Icons.Default.QrCode2, "가족 초대 QR 보기", "open_invite") { model.showInvite(true) }
+                    state.phase == AppPhase.HOME ->
+                        ToolbarButton(Icons.Default.Groups, "공간 선택", "open_space_selection") {
+                            model.navigate(AppRoute.SPACE_SELECTION)
+                        }
                 }
             }, trailing = {
                 if (state.phase == AppPhase.HOME && state.route == AppRoute.WELCOME) {
@@ -182,11 +206,12 @@ fun ButtonApp(model: AppViewModel) {
                 when {
                     state.route == AppRoute.CREATE_SPACE -> CreateSpaceScreen(model)
                     state.route == AppRoute.JOIN_SPACE -> JoinSpaceScreen(state, model)
+                    state.route == AppRoute.SPACE_SELECTION -> SpaceSelectionScreen(state, model)
                     state.route == AppRoute.SETTINGS -> SettingsScreen(state, model)
                     state.phase == AppPhase.SETUP -> WelcomeScreen(model)
                     state.phase == AppPhase.ROLE_SELECTION -> RoleSelectionScreen(model)
-                    state.role == AppRole.PARENT -> ParentHomeScreen(state, model)
-                    else -> ChildHomeScreen(state, model)
+                    state.role == AppRole.CHILD -> ChildHomeScreen(state, model)
+                    else -> ParentHomeScreen(state, model)
                 }
             }
             if (state.showInvite) InviteDialog(state.invite, model)
@@ -201,6 +226,7 @@ fun ButtonApp(model: AppViewModel) {
 private fun titleFor(state: AppUiState): String = when {
     state.route == AppRoute.CREATE_SPACE -> "새 가족 공간"
     state.route == AppRoute.JOIN_SPACE -> "초대로 참여"
+    state.route == AppRoute.SPACE_SELECTION -> "공간 선택"
     state.route == AppRoute.SETTINGS -> "설정"
     state.phase == AppPhase.SETUP -> "시작하기"
     state.phase == AppPhase.ROLE_SELECTION -> "역할 선택"
@@ -209,13 +235,14 @@ private fun titleFor(state: AppUiState): String = when {
 
 private fun homeStatusFor(state: AppUiState): String? {
     if (state.phase != AppPhase.HOME || state.route != AppRoute.WELCOME) return null
-    if (state.role == AppRole.PARENT && state.voiceState == VoiceState.RECORDING) return "녹음 중…"
+    if (state.role != AppRole.CHILD && state.voiceState == VoiceState.RECORDING) return "녹음 중…"
     return state.quietHoldRemainingSeconds.takeIf { it > 0 }?.let { "사이렌까지 ${it}초" }
 }
 
 private fun titleIconFor(state: AppUiState): ImageVector = when {
     state.route == AppRoute.CREATE_SPACE -> Icons.Default.AddCircle
     state.route == AppRoute.JOIN_SPACE -> Icons.Default.QrCodeScanner
+    state.route == AppRoute.SPACE_SELECTION -> Icons.Default.Groups
     state.route == AppRoute.SETTINGS -> Icons.Default.Settings
     state.phase == AppPhase.ROLE_SELECTION -> Icons.Default.SupervisorAccount
     else -> Icons.Default.NotificationsActive
@@ -303,6 +330,40 @@ private fun AdaptiveContent(tag: String, content: @Composable ColumnScope.() -> 
 }
 
 @Composable
+private fun RefreshableAdaptiveContent(
+    tag: String,
+    state: AppUiState,
+    model: AppViewModel,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val isTv = LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK ==
+        Configuration.UI_MODE_TYPE_TELEVISION
+    if (isTv) {
+        AdaptiveContent(tag) {
+            content()
+            Spacer(Modifier.height(18.dp))
+            OutlinedButton(
+                onClick = model::refreshHome,
+                enabled = !state.isRefreshing,
+                modifier = Modifier.fillMaxWidth().testTag("home_refresh_tv"),
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (state.isRefreshing) "새로고침 중…" else "새로고침")
+            }
+        }
+    } else {
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = model::refreshHome,
+            modifier = Modifier.fillMaxSize().testTag("home_pull_refresh"),
+        ) {
+            AdaptiveContent(tag, content)
+        }
+    }
+}
+
+@Composable
 private fun WelcomeScreen(model: AppViewModel) = AdaptiveContent("setup_welcome") {
     Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -335,6 +396,125 @@ private fun SetupRow(title: String, subtitle: String, icon: ImageVector, tag: St
             Text(subtitle, fontSize = 13.sp, color = Secondary)
         }
         Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Secondary.copy(.45f), modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun SpaceSelectionScreen(state: AppUiState, model: AppViewModel) =
+    AdaptiveContent("space_selection") {
+        Text(
+            "사용할 공간을 고르세요.",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Charcoal,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "고르면 바로 그 공간의 홈으로 이동해요.",
+            fontSize = 13.sp,
+            color = Secondary,
+        )
+        Spacer(Modifier.height(18.dp))
+        Text("저장된 공간", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Secondary)
+        Spacer(Modifier.height(8.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            state.rooms.forEach { room ->
+                val current = room.invite.spaceId == state.invite?.spaceId
+                SetupRow(
+                    title = room.invite.spaceName,
+                    subtitle = spaceSelectionSubtitle(room, current),
+                    icon = if (current) Icons.Default.CheckCircle else Icons.Default.Groups,
+                    tag = "select_space_${room.invite.spaceId}",
+                ) { model.switchRoom(room.invite.spaceId) }
+            }
+        }
+        Spacer(Modifier.height(22.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SetupRow(
+                "새 공간 만들기",
+                "새 가족 공간을 만들고 이 기기에 함께 보관해요.",
+                Icons.Default.AddCircle,
+                "space_hub_create",
+            ) { model.navigate(AppRoute.CREATE_SPACE) }
+            SetupRow(
+                "다른 공간 참여하기",
+                "다른 기기의 초대 QR을 스캔해요.",
+                Icons.Default.QrCodeScanner,
+                "space_hub_join",
+            ) { model.navigate(AppRoute.JOIN_SPACE) }
+            if (state.invite != null) {
+                SetupRow(
+                    "현재 공간 초대 QR",
+                    "${state.spaceName} 공간에 가족을 초대해요.",
+                    Icons.Default.QrCode2,
+                    "space_hub_invite",
+                ) { model.showInvite(true) }
+            }
+        }
+        SpaceSelectionUpdateCheck()
+    }
+
+@Composable
+private fun SpaceSelectionUpdateCheck() {
+    val context = LocalContext.current
+    val manager = remember(context) { DirectUpdateManager.get(context) }
+    val state by manager.state.collectAsState()
+    val presentation = spaceHubUpdatePresentation(state)
+    Spacer(Modifier.height(28.dp))
+    presentation.statusText?.let { status ->
+        Text(
+            status,
+            fontSize = 13.sp,
+            color = if (presentation.action == SpaceHubUpdateAction.RETRY) Red else Secondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().testTag("space_hub_update_status"),
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+    if (presentation.showProgress) {
+        val total = state.size ?: 0L
+        if (state.downloaded > 0 && total > 0) {
+            LinearProgressIndicator(
+                progress = { (state.downloaded.toFloat() / total).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().testTag("space_hub_update_progress"),
+            )
+        } else {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().testTag("space_hub_update_progress"),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+    if (presentation.action == SpaceHubUpdateAction.NONE) {
+        Box(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("space_hub_update")
+                .semantics {
+                    contentDescription = if (presentation.showProgress) {
+                        "최신 버전 확인 중"
+                    } else presentation.buttonLabel
+                    disabled()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(presentation.buttonLabel, fontWeight = FontWeight.SemiBold, color = Accent)
+        }
+    } else {
+        Button(
+            enabled = presentation.enabled,
+            onClick = {
+                when (presentation.action) {
+                    SpaceHubUpdateAction.CHECK -> manager.check()
+                    SpaceHubUpdateAction.DOWNLOAD -> manager.download()
+                    SpaceHubUpdateAction.CANCEL -> manager.cancel()
+                    SpaceHubUpdateAction.INSTALL -> context.findActivity()?.let(manager::handoffInstaller)
+                    SpaceHubUpdateAction.RETRY -> manager.retry()
+                    SpaceHubUpdateAction.NONE -> Unit
+                }
+            },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("space_hub_update"),
+        ) {
+            Text(presentation.buttonLabel, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -446,22 +626,26 @@ private fun RoleSelectionScreen(model: AppViewModel) = AdaptiveContent("role_sel
     if (wide) Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         RoleCard(AppRole.PARENT, Accent, model, Modifier.weight(1f))
         RoleCard(AppRole.CHILD, Voice, model, Modifier.weight(1f))
+        RoleCard(AppRole.GENERAL, Quiet, model, Modifier.weight(1f))
     } else Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         RoleCard(AppRole.PARENT, Accent, model)
         RoleCard(AppRole.CHILD, Voice, model)
+        RoleCard(AppRole.GENERAL, Quiet, model)
     }
 }
 
 @Composable
 private fun RoleCard(role: AppRole, color: Color, model: AppViewModel, modifier: Modifier = Modifier) {
     val parent = role == AppRole.PARENT
+    val child = role == AppRole.CHILD
+    val label = roleLabel(role)
     Column(modifier.fillMaxWidth().heightIn(min = 116.dp).enamelCard(18.dp)
-        .clickable { model.selectRole(role) }.testTag(if (parent) "role_parent" else "role_child").padding(14.dp),
+        .clickable { model.selectRole(role) }.testTag("role_${role.name.lowercase()}").padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Icon(if (parent) Icons.Default.SupervisorAccount else Icons.Default.ChildCare,
+        Icon(if (parent) Icons.Default.SupervisorAccount else if (child) Icons.Default.ChildCare else Icons.Default.Person,
             contentDescription = null, tint = color, modifier = Modifier.size(32.dp))
         Spacer(Modifier.height(10.dp))
-        Text(if (parent) "부모" else "자녀", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(3.dp))
         Text("음성과 호출을 주고받아요",
             fontSize = 12.sp, color = Secondary, textAlign = TextAlign.Center)
@@ -469,13 +653,13 @@ private fun RoleCard(role: AppRole, color: Color, model: AppViewModel, modifier:
 }
 
 @Composable
-private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveContent("parent_home") {
+private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = RefreshableAdaptiveContent("parent_home", state, model) {
     val voiceTitle = when (state.voiceState) {
         VoiceState.REQUESTING_PERMISSION -> "권한 확인 중…"
         VoiceState.RECORDING -> "녹음 중…"
         VoiceState.DENIED -> "마이크 설정 필요"
         VoiceState.READY -> "전송 확인"
-        VoiceState.SENT -> "전송했어요"
+        VoiceState.SENT -> "전송 대기"
         VoiceState.IDLE -> "음성"
     }
     val voiceIcon = when (state.voiceState) {
@@ -519,7 +703,7 @@ private fun ParentHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveC
 }
 
 @Composable
-private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = AdaptiveContent("child_home") {
+private fun ChildHomeScreen(state: AppUiState, model: AppViewModel) = RefreshableAdaptiveContent("child_home", state, model) {
     PresenceCard(state, model::toggleRecipient)
     Spacer(Modifier.height(18.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -603,14 +787,19 @@ private fun PresenceCard(
                 modifier = Modifier.weight(1f))
             CompactTransportStatus(state)
             Spacer(Modifier.width(8.dp))
-            Text("${state.members.size}명", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Secondary)
+            Text("구성원 ${state.members.size}명", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Secondary)
         }
-        state.members.chunked(2).forEach { rowMembers ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowMembers.forEach { member ->
-                    PresenceTile(member, member.id in state.selectedTargetIDs, onSelect, Modifier.weight(1f))
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val columns = presenceColumnCount(maxWidth.value.toInt())
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.members.chunked(columns).forEach { rowMembers ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowMembers.forEach { member ->
+                            PresenceTile(member, member.id in state.selectedTargetIDs, onSelect, Modifier.weight(1f))
+                        }
+                        repeat(columns - rowMembers.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
-                if (rowMembers.size == 1) Spacer(Modifier.weight(1f))
             }
         }
         Text(if (state.selectedTargetIDs.isEmpty()) "선택하지 않으면 모두에게 보내요." else "선택한 사람들에게만 보내요.",
@@ -625,34 +814,52 @@ private fun PresenceTile(
     onSelect: (PresenceUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier.heightIn(min = 48.dp).background(Grouped.copy(.72f), RoundedCornerShape(12.dp))
+    Row(modifier.heightIn(min = 58.dp).background(Grouped.copy(.72f), RoundedCornerShape(12.dp))
         .border(1.dp, if (selected) Red.copy(.55f) else Chrome.copy(.35f), RoundedCornerShape(12.dp))
-        .clickable(enabled = !member.isCurrentDevice) { onSelect(member) }
+        .clickable { onSelect(member) }
         .padding(horizontal = 10.dp, vertical = 7.dp)
         .semantics {
-            contentDescription = if (member.isCurrentDevice) {
-                "${member.name}, 현재 기기"
-            } else {
-                "${member.name}, 함께 받을 사람으로 선택하거나 해제하세요"
-            }
+            contentDescription = presenceAccessibilityDescription(member)
+            onClick(
+                label = if (member.isCurrentDevice) {
+                    if (member.notificationsMuted) "알림 켜기" else "알림 끄기"
+                } else "받을 사람 선택 또는 해제",
+            ) { onSelect(member); true }
         }, verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(
-            if (member.role == AppRole.PARENT) Icons.Default.Person else Icons.Default.PhoneAndroid,
+            if (member.role == AppRole.CHILD) Icons.Default.ChildCare else Icons.Default.Person,
             contentDescription = null,
             tint = if (member.isCurrentDevice) Accent else Quiet,
             modifier = Modifier.size(20.dp),
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(member.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            val role = if (member.role == AppRole.PARENT) "부모" else if (member.role == AppRole.CHILD) "자녀" else "가족"
-            Text(if (member.isCurrentDevice) "이 기기 · $role" else "전송 가능 · $role",
-                fontSize = 11.sp, color = Secondary, maxLines = 1)
+            Text(
+                visibleMemberName(member.name),
+                fontSize = memberNameFontSizeSp(member.name).sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.Medium,
+                color = Charcoal,
+                softWrap = false,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+            )
+            Text(
+                presenceCompactStatusText(member),
+                fontSize = 10.sp,
+                color = if (member.notificationsMuted ||
+                    member.notificationMuteSyncStatus == NotificationMuteSyncStatus.ERROR) Red else Secondary,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+            )
         }
         if (selected) {
             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Red, modifier = Modifier.size(20.dp))
         } else {
-            Box(Modifier.size(7.dp).background(if (member.isCurrentDevice) Accent else Quiet, CircleShape))
+            Box(Modifier.size(7.dp).background(
+                if (member.notificationsMuted) Secondary else if (member.isCurrentDevice) Accent else Quiet,
+                CircleShape,
+            ))
         }
     }
 }
@@ -662,7 +869,7 @@ private fun CompactTransportStatus(state: AppUiState) {
     val (text, color) = when (state.transportStatus) {
         TransportUiStatus.IDLE -> "대기" to Secondary
         TransportUiStatus.SEARCHING -> "연결 중" to Orange
-        TransportUiStatus.CONNECTED -> "${state.connectedCount}대 연결" to Green
+        TransportUiStatus.CONNECTED -> "근처 ${state.connectedCount}대" to Green
         TransportUiStatus.DEMO -> "데모" to Purple
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -736,8 +943,10 @@ private fun CallHistoryRow(entry: CallHistoryEntry, onReplayVoice: (CallHistoryE
             val destination = if (entry.counterpartName == "모두") "모두에게" else "${entry.counterpartName}에게"
             Text(
                 if (entry.direction == CallHistoryEntry.Direction.SENT) {
-                    val particle = if (entry.kind == CallEvent.Kind.VoiceMessage) "를" else "을"
-                    "$destination ${entry.kind.title}$particle 보냈어요."
+                    val particle = "을"
+                    if (entry.pendingRecipientCount > 0) {
+                        "$destination ${entry.kind.title}$particle 전송 대기 중이에요."
+                    } else "$destination ${entry.kind.title}$particle 전달을 확인했어요."
                 } else {
                     "${entry.counterpartName}의 ${entry.kind.arrivalTitle} 왔어요."
                 },
@@ -964,18 +1173,8 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
     AdaptiveContent("settings") {
         SettingsSection("가족 공간") {
             SettingsValue("이름", state.spaceName)
-            SettingsValue("역할", if (state.role == AppRole.PARENT) "부모" else if (state.role == AppRole.CHILD) "자녀" else "-")
+            SettingsValue("역할", roleLabel(state.role))
             SettingsValue("내 이름", state.displayName.ifEmpty { "-" })
-            state.rooms.forEach { room ->
-                SettingsButton(
-                    if (room.invite.spaceId == state.invite?.spaceId) "${room.invite.spaceName} · 사용 중"
-                    else "${room.invite.spaceName} · 전환",
-                    "switch_room_${room.invite.spaceId}",
-                    if (room.invite.spaceId == state.invite?.spaceId) Secondary else Accent,
-                ) { model.switchRoom(room.invite.spaceId) }
-            }
-            SettingsButton("새 가족 공간 만들기", "create_another_room") { model.navigate(AppRoute.CREATE_SPACE) }
-            SettingsButton("다른 공간 초대로 참여", "join_another_room") { model.navigate(AppRoute.JOIN_SPACE) }
             SettingsButton("역할 다시 고르기", "choose_role_again") { model.chooseRoleAgain() }
             SettingsButton("공간 나가기", "leave_space", Red) { confirmLeave = true }
         }

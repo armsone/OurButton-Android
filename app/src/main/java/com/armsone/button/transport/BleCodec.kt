@@ -17,6 +17,7 @@ class BleCodecError(message: String) : IllegalArgumentException(message)
 
 object BleCodec {
     const val HEADER_LENGTH = 9
+    const val MAX_BLE_VOICE_BYTES = 64 * 1024
     private const val FRAME_VERSION = 1
     private const val NONCE_LENGTH = 12
     private const val TAG_LENGTH_BITS = 128
@@ -64,6 +65,10 @@ object BleCodec {
         }
     }
 
+    fun supports(event: CallEvent): Boolean =
+        event.kind != CallEvent.Kind.VoiceMessage ||
+            event.voiceData?.size?.let { it in 1..MAX_BLE_VOICE_BYTES } == true
+
     private fun key(secret: String): SecretKeySpec {
         val material = "button-ble-v1|$secret".toByteArray(Charsets.UTF_8)
         return SecretKeySpec(MessageDigest.getInstance("SHA-256").digest(material), "AES")
@@ -82,6 +87,23 @@ object BleCodec {
     }
 }
 
+data class BlePeerRoutes(
+    val notifyAddresses: Set<String>,
+    val writeAddresses: Set<String>,
+)
+
+/**
+ * A peer may connect in either BLE direction. Notify peers are served by our GATT server;
+ * remaining connected peers must receive the same frame through a client characteristic write.
+ */
+fun blePeerRoutes(
+    subscribedAddresses: Set<String>,
+    connectedAddresses: Set<String>,
+): BlePeerRoutes = BlePeerRoutes(
+    notifyAddresses = subscribedAddresses,
+    writeAddresses = connectedAddresses - subscribedAddresses,
+)
+
 class BleReassembler {
     private data class Pending(
         val count: Int,
@@ -92,7 +114,7 @@ class BleReassembler {
     private val pending = mutableMapOf<String, Pending>()
 
     fun append(fragment: ByteArray, peerID: String, now: Instant = Instant.now()): ByteArray? {
-        pending.entries.removeAll { Duration.between(it.value.createdAt, now).toMillis() >= 15_000 }
+        pending.entries.removeAll { Duration.between(it.value.createdAt, now).toMillis() >= 30_000 }
         if (fragment.size < BleCodec.HEADER_LENGTH || fragment[0].toInt() != 1) return null
 
         val messageID = fragment.readUInt32(1)

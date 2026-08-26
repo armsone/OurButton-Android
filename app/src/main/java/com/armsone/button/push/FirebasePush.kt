@@ -95,34 +95,34 @@ data class PushMembership(
     val role: FamilyRole,
 )
 
-class PushRegistrationManager(
-    context: Context,
+class PushRegistrationManager internal constructor(
+    private val store: PushStore,
     private val backend: BackendClient,
     private val tokens: PushTokenProvider,
 ) {
-    private val appContext = context.applicationContext
-    private val store = PushStore(appContext)
+    constructor(
+        context: Context,
+        backend: BackendClient,
+        tokens: PushTokenProvider,
+    ) : this(PushStore(context.applicationContext), backend, tokens)
 
     fun updateMembership(membership: PushMembership) = updateMemberships(listOf(membership))
     fun updateMemberships(memberships: List<PushMembership>) = store.saveMemberships(memberships)
     fun clearMembership() = store.clearMemberships()
     fun statusDescription(): String = when {
         tokens.statusDescription == "Firebase 설정 필요" -> tokens.statusDescription
-        store.registeredFingerprint != null -> "FCM 등록됨"
+        !store.token.isNullOrBlank() && store.registeredFingerprint != null -> "FCM 등록됨"
         else -> "요청하지 않음"
     }
 
     suspend fun requestTokenAndRegister(): Result<Unit> = tokens.requestRegistration().fold(
-        onSuccess = { registerCurrentTokenIfAvailable() ?: Result.success(Unit) },
+        onSuccess = { syncMemberships(store.token) },
         onFailure = { Result.failure(it) },
     )
 
-    suspend fun registerCurrentTokenIfAvailable(): Result<Unit>? {
-        val token = store.token ?: return null
-        return register(token)
-    }
+    suspend fun registerCurrentTokenIfAvailable(): Result<Unit> = syncMemberships(store.token)
 
-    private suspend fun register(token: String): Result<Unit> {
+    suspend fun syncMemberships(token: String? = store.token): Result<Unit> {
         val memberships = store.memberships
         if (memberships.isEmpty()) return Result.failure(
             IllegalStateException("먼저 가족 공간에 참여해 주세요."),
@@ -144,17 +144,17 @@ class PushRegistrationManager(
         }
     }
 
-    private fun registrationFingerprint(token: String, memberships: List<PushMembership>): String {
-        val parts = memberships.sortedBy { it.space.id.toString() }.flatMap { membership -> listOf(
-            membership.space.id, membership.space.secret, membership.deviceID,
-            membership.name, membership.role.rawValue,
-        ) }
-        val bytes = (listOf(token) + parts).joinToString("\u0000").toByteArray()
-        return MessageDigest.getInstance("SHA-256").digest(bytes)
-            .joinToString("") { "%02x".format(it) }
-    }
-
     companion object {
+        fun registrationFingerprint(token: String?, memberships: List<PushMembership>): String {
+            val parts = memberships.sortedBy { it.space.id.toString() }.flatMap { membership -> listOf(
+                membership.space.id, membership.space.secret, membership.deviceID,
+                membership.name, membership.role.rawValue,
+            ) }
+            val bytes = (listOf(token.orEmpty()) + parts).joinToString("\u0000").toByteArray()
+            return MessageDigest.getInstance("SHA-256").digest(bytes)
+                .joinToString("") { "%02x".format(it) }
+        }
+
         fun enqueue(context: Context) {
             val request = OneTimeWorkRequestBuilder<PushRegistrationWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -168,11 +168,11 @@ class PushRegistrationManager(
     }
 }
 
-internal class PushStore(context: Context) {
-    private val prefs = context.getSharedPreferences("button_push", Context.MODE_PRIVATE)
+internal class PushStore(private val prefs: android.content.SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences("button_push", Context.MODE_PRIVATE))
     var token: String?
         get() = prefs.getString("token", null)
-        private set(value) { prefs.edit().putString("token", value).apply() }
+        set(value) { prefs.edit().putString("token", value).apply() }
     var registeredFingerprint: String?
         get() = prefs.getString("registeredFingerprint", null)
         set(value) { prefs.edit().putString("registeredFingerprint", value).apply() }

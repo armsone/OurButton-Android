@@ -55,10 +55,55 @@ class PushRegistrationWorker(
             HttpBackendClient(configuration),
             FirebasePushTokenProvider(applicationContext),
         )
-        val outcome = manager.registerCurrentTokenIfAvailable() ?: return Result.success()
+        val outcome = manager.registerCurrentTokenIfAvailable()
         return outcome.fold(
             onSuccess = { Result.success() },
             onFailure = ::workerFailure,
+        )
+    }
+}
+
+class NotificationMuteWorker(
+    appContext: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result {
+        val spaceID = inputData.getString("spaceID")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return Result.failure()
+        val requestedMuted = inputData.getBoolean("notificationsMuted", false)
+        val muteStore = SpaceNotificationMuteStore(applicationContext)
+        if (muteStore.state(spaceID).muted != requestedMuted) return Result.success()
+        val membership = PushStore(applicationContext).memberships
+            .firstOrNull { it.space.id == spaceID }
+            ?: run {
+                muteStore.markError(spaceID, requestedMuted, "이 공간의 기기 정보를 다시 확인해 주세요.")
+                return Result.failure()
+            }
+        val configuration = BackendConfiguration.load(applicationContext)
+        if (!configuration.isConfigured) {
+            muteStore.markError(spaceID, requestedMuted, "서버 연결 설정을 확인해 주세요.")
+            return Result.failure()
+        }
+        return runCatching {
+            HttpBackendClient(configuration).setNotificationsMuted(
+                membership.space,
+                membership.deviceID,
+                requestedMuted,
+            )
+        }.fold(
+            onSuccess = {
+                muteStore.markSynced(spaceID, requestedMuted)
+                Result.success()
+            },
+            onFailure = { error ->
+                muteStore.markError(
+                    spaceID,
+                    requestedMuted,
+                    error.message ?: "알림 설정을 동기화하지 못했어요.",
+                )
+                workerFailure(error)
+            },
         )
     }
 }
@@ -99,9 +144,19 @@ class PushDeliveryWorker(
             history.recordReceived(event)
         }
 
+        // Muting never drops the authenticated event or its voice file; it only suppresses
+        // app-owned presentation. The history remains available for explicit user playback.
+        if (shouldSuppressAppOwnedAlert(
+                SpaceNotificationMuteStore(applicationContext).isMuted(event.spaceID),
+                event.kind,
+            )
+        ) {
+            return Result.success()
+        }
+
         if (!RemoteEventRouter.route(event)) {
             if (event.kind == CallEvent.Kind.VoiceMessage) {
-                PendingVoiceStore(applicationContext).record(event.id)
+                PendingVoiceStore(applicationContext).record(event.id, event.spaceID)
             }
             NotificationHelper(
                 applicationContext,

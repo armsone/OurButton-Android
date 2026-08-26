@@ -51,6 +51,7 @@ class AndroidBleTransport(context: Context) : CallTransport {
     override val status: TransportStatus get() = currentStatus
     override var onEvent: ((CallEvent) -> Unit)? = null
     override var onStatusChange: ((TransportStatus) -> Unit)? = null
+    var onPeerDisconnected: ((UUID, UUID) -> Unit)? = null
 
     private var started = false
     private var space: FamilySpace? = null
@@ -63,6 +64,7 @@ class AndroidBleTransport(context: Context) : CallTransport {
     private var reassembler = BleReassembler()
     private val cachedPresence = mutableMapOf<UUID, CallEvent>()
     private val recentOutgoing = mutableMapOf<UUID, Pair<CallEvent, Long>>()
+    private val authenticatedPeerIDs = mutableMapOf<String, Pair<UUID, UUID>>()
 
     override fun start(space: FamilySpace, displayName: String) {
         operations.execute {
@@ -93,7 +95,7 @@ class AndroidBleTransport(context: Context) : CallTransport {
     }
 
     override fun send(event: CallEvent) {
-        if (event.kind == CallEvent.Kind.VoiceMessage) throw TransportError.NoPeers
+        if (!BleCodec.supports(event)) throw TransportError.NoPeers
         val activeSpace = space
         if (!started || activeSpace == null || event.spaceID != activeSpace.id || !hasRuntimePermissions()) {
             throw TransportError.NoPeers
@@ -105,12 +107,12 @@ class AndroidBleTransport(context: Context) : CallTransport {
         operations.execute {
             if (!started || space?.id != event.spaceID) return@execute
             if (event.kind == CallEvent.Kind.Presence) {
-                cachedPresence[event.senderID ?: event.id] = event
+                event.senderID?.let { cachedPresence[it] = event }
             } else {
                 recentOutgoing[event.id] = event to (System.currentTimeMillis() + 30_000L)
             }
             transmit(event)
-            if (event.kind != CallEvent.Kind.Presence) {
+            if (event.kind != CallEvent.Kind.Presence && event.kind != CallEvent.Kind.VoiceMessage) {
                 listOf(1L, 2L, 4L, 8L, 12L).forEach { seconds ->
                     operations.schedule({
                         if (started && recentOutgoing[event.id]?.second?.let {
@@ -143,8 +145,10 @@ class AndroidBleTransport(context: Context) : CallTransport {
         closeGattServer()
         val characteristic = BluetoothGattCharacteristic(
             EVENT_UUID,
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ,
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY or
+                BluetoothGattCharacteristic.PROPERTY_WRITE or
+                BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+            BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE,
         ).apply {
             addDescriptor(
                 BluetoothGattDescriptor(
@@ -219,6 +223,7 @@ class AndroidBleTransport(context: Context) : CallTransport {
                 if (!started || status != BluetoothGatt.GATT_SUCCESS || newState != BluetoothProfile.STATE_CONNECTED) {
                     centralGatts.remove(gatt.device.address)
                     runCatching { gatt.close() }
+                    publishPeerDisconnectedIfGone(gatt.device.address)
                 } else {
                     centralGatts[gatt.device.address] = gatt
                     runCatching { gatt.requestMtu(185) }
@@ -243,6 +248,15 @@ class AndroidBleTransport(context: Context) : CallTransport {
             }
         }
 
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            operations.execute {
+                if (status != BluetoothGatt.GATT_SUCCESS || descriptor.uuid != CCCD_UUID) return@execute
+                cachedPresence.values.forEach { transmitToCentralGatt(it, gatt) }
+                pruneRecent()
+                recentOutgoing.values.forEach { transmitToCentralGatt(it.first, gatt) }
+            }
+        }
+
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -261,7 +275,10 @@ class AndroidBleTransport(context: Context) : CallTransport {
     private val serverCallback = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             operations.execute {
-                if (newState != BluetoothProfile.STATE_CONNECTED) subscribedCentrals.remove(device.address)
+                if (newState != BluetoothProfile.STATE_CONNECTED) {
+                    subscribedCentrals.remove(device.address)
+                    publishPeerDisconnectedIfGone(device.address)
+                }
                 updateStatus()
             }
         }
@@ -298,17 +315,46 @@ class AndroidBleTransport(context: Context) : CallTransport {
                 updateStatus()
             }
         }
+
+
+        override fun onCharacteristicWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            characteristic: BluetoothGattCharacteristic,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray,
+        ) {
+            operations.execute {
+                val accepted = characteristic.uuid == EVENT_UUID && !preparedWrite && offset == 0
+                if (accepted) accept(value, device.address)
+                if (responseNeeded) {
+                    gattServer?.sendResponse(
+                        device,
+                        requestId,
+                        if (accepted) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED,
+                        offset,
+                        value,
+                    )
+                }
+            }
+        }
     }
 
     private fun transmit(event: CallEvent, only: List<BluetoothDevice>? = null) {
         val activeSpace = space ?: return
         val characteristic = eventCharacteristic ?: return
-        val devices = only ?: subscribedCentrals.values.toList()
-        if (devices.isEmpty()) return
         val fragments = runCatching {
             BleCodec.fragments(event, activeSpace.secret, MAX_PAYLOAD_LENGTH)
         }.getOrNull() ?: return
-        devices.forEach { device ->
+        val routes = if (only != null) {
+            BlePeerRoutes(only.mapTo(mutableSetOf()) { it.address }, emptySet())
+        } else {
+            blePeerRoutes(subscribedCentrals.keys, centralGatts.keys)
+        }
+        routes.notifyAddresses.mapNotNull(subscribedCentrals::get).forEach { device ->
+            val fragmentIntervalMillis = if (event.kind == CallEvent.Kind.VoiceMessage) 20L else 25L
             fragments.forEachIndexed { index, fragment ->
                 operations.schedule({
                     val server = gattServer ?: return@schedule
@@ -318,8 +364,40 @@ class AndroidBleTransport(context: Context) : CallTransport {
                         characteristic.value = fragment
                         server.notifyCharacteristicChanged(device, characteristic, false)
                     }
-                }, index * 25L, TimeUnit.MILLISECONDS)
+                }, index * fragmentIntervalMillis, TimeUnit.MILLISECONDS)
             }
+        }
+        routes.writeAddresses.mapNotNull(centralGatts::get).forEach { gatt ->
+            transmitToCentralGatt(event, gatt, fragments)
+        }
+    }
+
+    private fun transmitToCentralGatt(
+        event: CallEvent,
+        gatt: BluetoothGatt,
+        preparedFragments: List<ByteArray>? = null,
+    ) {
+        val activeSpace = space ?: return
+        val characteristic = gatt.getService(SERVICE_UUID)?.getCharacteristic(EVENT_UUID) ?: return
+        val fragments = preparedFragments ?: runCatching {
+            BleCodec.fragments(event, activeSpace.secret, MAX_PAYLOAD_LENGTH)
+        }.getOrNull() ?: return
+        val fragmentIntervalMillis = if (event.kind == CallEvent.Kind.VoiceMessage) 20L else 25L
+        fragments.forEachIndexed { index, fragment ->
+            operations.schedule({
+                if (!started || centralGatts[gatt.device.address] !== gatt) return@schedule
+                if (Build.VERSION.SDK_INT >= 33) {
+                    gatt.writeCharacteristic(
+                        characteristic,
+                        fragment,
+                        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+                    )
+                } else {
+                    characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                    characteristic.value = fragment
+                    gatt.writeCharacteristic(characteristic)
+                }
+            }, index * fragmentIntervalMillis, TimeUnit.MILLISECONDS)
         }
     }
 
@@ -327,8 +405,15 @@ class AndroidBleTransport(context: Context) : CallTransport {
         val activeSpace = space ?: return
         val combined = reassembler.append(fragment, peerId) ?: return
         val event = runCatching { BleCodec.open(combined, activeSpace.secret) }.getOrNull() ?: return
-        if (event.spaceID != activeSpace.id || event.kind == CallEvent.Kind.VoiceMessage) return
+        if (event.spaceID != activeSpace.id) return
+        event.senderID?.let { authenticatedPeerIDs[peerId] = activeSpace.id to it }
         main.post { onEvent?.invoke(event) }
+    }
+
+    private fun publishPeerDisconnectedIfGone(address: String) {
+        if (centralGatts.containsKey(address) || subscribedCentrals.containsKey(address)) return
+        val identity = authenticatedPeerIDs.remove(address) ?: return
+        main.post { onPeerDisconnected?.invoke(identity.first, identity.second) }
     }
 
     private fun pruneRecent() {
@@ -367,6 +452,7 @@ class AndroidBleTransport(context: Context) : CallTransport {
         closeGattServer()
         cachedPresence.clear()
         recentOutgoing.clear()
+        authenticatedPeerIDs.clear()
         reassembler = BleReassembler()
         space = null
         publishStatus(TransportStatus.Idle)

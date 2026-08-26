@@ -17,6 +17,12 @@ enum class FamilyRole(
         title = "자녀",
         subtitle = "음성과 호출을 주고받아요",
         symbolName = "face.smiling",
+    ),
+    General(
+        rawValue = "general",
+        title = "일반",
+        subtitle = "음성과 호출을 주고받아요",
+        symbolName = "person",
     );
 
     companion object {

@@ -1,0 +1,145 @@
+version: 1
+product: button
+features:
+  direct_updates:
+    version: 2.0.1
+    build: "202608251140"
+    apple_testflight:
+      status: intentional_exception
+      behavior: TestFlight manages update discovery, download, and installation.
+    android_direct:
+      status: implemented_source_only
+      repository: armsone/button-Android
+      metadata: official GitHub latest stable release API
+      asset: Button-Android-v<version>-build<versionCode>.apk
+      behavior:
+        - check_on_start
+        - automatic_download_default_on_and_user_controllable
+        - manual_check_download_cancel_retry
+        - validate_repo_tag_https_path_size_sha256_package_signer_and_newer_apk
+        - hand_verified_apk_to_system_installer
+      verification: pending_build_and_runtime
+  spaces_and_membership:
+    version: 2.0.1
+    build: "202608251400"
+    contract:
+      local_persistence:
+        status: implemented_source_only
+        behavior:
+          - local_space_records_saved_independently_of_push_tokens
+          - qr_create_and_join_persists_immediately_with_selected_role
+          - remote_failure_cannot_erase_valid_local_join
+          - multi_space_creation_from_setup_and_settings_without_deleting_existing_spaces
+          - active_space_switching_and_relaunch_persistence
+      space_selection_hub:
+        status: implemented_build_verified
+        behavior:
+          - home_top_left_space_selection_action_for_parent_and_child
+          - all_saved_spaces_with_current_selection_and_immediate_switch_to_home
+          - saved_spaces_new_space_create_other_space_join_and_current_invite_qr_in_one_hub
+          - space_switch_create_and_join_are_not_nested_under_settings
+          - per_space_notification_mute_syncing_or_sync_needed_is_compact_and_inline
+          - recoverable_background_mute_sync_never_opens_a_blocking_error_modal
+          - latest_version_check_is_the_bottommost_full_width_space_hub_action
+          - update_check_reuses_each_platform_official_existing_update_route
+          - checking_current_available_and_actionable_error_states_never_claim_unverified_installation
+        text:
+          title: 공간 선택
+          saved_spaces: 저장된 공간
+          create: 새 공간 만들기
+          join: 다른 공간 참여하기
+          syncing: 동기화 중
+          sync_needed: 동기화 필요
+          update_check: 최신 버전 확인
+          update_checking: 확인 중…
+          update_current: 최신 버전이에요
+          update_retry: 다시 확인
+        platform_update_route:
+          apple: App Store or TestFlight destination returned by the existing checker
+          android: existing verified DirectUpdateManager GitHub release download and Android installer handoff
+      membership_visibility:
+        status: implemented_source_only
+        behavior:
+          - token_optional_backend_device_registration
+          - symmetric_membership_presence_across_qr_creator_and_participant
+          - durable_member_list_is_local_self_union_authoritative_members_deduped_by_device_id
+          - ble_live_state_never_deletes_durable_members
+          - authenticated_same_space_events_persist_only_the_stable_sender_device_id_as_a_known_member
+          - authoritative_members_reconcile_known_members_by_device_id_without_name_matching
+          - missing_sender_id_never_falls_back_to_a_per_event_id_for_member_identity
+          - member_count_and_nearby_connection_count_are_separate
+          - refresh_after_registration_join_role_switch_foreground_and_bounded_visible_interval
+          - home_pull_to_refresh_runs_registration_members_status_inbox_and_outbox_recovery
+          - foreground_resume_refreshes_immediately_then_every_30_seconds_while_visible
+          - background_or_dispose_cancels_visible_refresh_and_stale_space_completion
+          - concurrent_pull_periodic_and_resume_refreshes_are_coalesced_without_overlap
+          - refresh_spinner_is_bounded_and_tv_uses_a_focusable_새로고침_action
+          - ble_peer_disconnect_keeps_the_durable_card_and_immediately_changes_live_status
+          - concurrent_or_old_space_member_responses_are_rejected
+          - token_mute_connectivity_and_last_seen_never_filter_durable_members
+          - compact_phone_uses_one_dynamic_full_width_member_card_per_row
+          - wide_android_uses_columns_only_when_each_member_card_remains_at_least_roughly_250dp
+          - member_name_is_trimmed_with_a_family_fallback_and_rendered_without_ellipsis_or_a_hard_line_cap
+          - member_cards_use_name_then_one_accessible_role_notification_live_metadata_line
+      roles:
+        status: implemented_source_only
+        wire_values:
+          - parent
+          - child
+          - general
+        behavior:
+          - general_is_shown_as_일반
+          - general_has_parent_call_voice_and_cooldown_behavior
+          - role_is_preserved_in_membership_events_push_and_relaunch_persistence
+      per_space_device_notification_mute:
+        status: implemented_build_verified
+        api:
+          update: POST /v1/devices with optional notificationsMuted boolean
+          membership_read: GET /v1/spaces/{spaceID}/members returns notificationsMuted boolean
+          authentication: update uses body secret; read uses X-Space-Secret
+          idempotency: repeated identical boolean preserves membership token name and role
+        behavior:
+          - tapping_the_current_device_member_row_toggles_only_that_space
+          - local_mute_protection_is_immediate_and_persists_until_explicitly_reenabled
+          - offline_changes_are_queued_and_retried_with_syncing_or_error_state
+          - incoming_call_voice_sound_flash_and_visible_app_alerts_are_suppressed_while_muted
+          - authenticated_events_and_voice_history_are_preserved_while_muted
+          - every_member_row_shows_server_confirmed_notification_mute_status
+          - membership_and_push_token_remain_registered_while_muted
+          - all_muted_server_acceptance_is_shown_as_quiet_storage_not_delivery
+        device_support:
+          - android_phone_touch_and_accessibility
+          - android_tablet_adaptive_layout
+          - google_tv_dpad_action
+      calls_and_voice:
+        status: implemented_source_only
+        behavior:
+          - immutable_active_space_snapshot_for_each_outbound_call
+          - voice_ready_state_is_retained_until_server_acceptance
+          - durable_outbox_stores_the_same_event_id_before_any_transport_attempt
+          - visible_durable_member_remains_a_valid_target_without_push_or_direct_route
+          - server_stored_or_queued_result_is_shown_as_전송_대기_not_failure_or_delivery_confirmation
+          - recoverable_network_or_no_route_state_never_opens_a_blocking_modal
+          - no_delivery_confirmation_before_recipient_ack_evidence
+          - same_event_id_bounded_retry_for_network_429_and_5xx_failures
+          - inbox_poll_on_activation_relaunch_connectivity_and_bounded_visible_interval
+          - inbox_event_id_dedup_then_idempotent_ack_and_cursor_persistence
+          - pending_received_voice_is_scoped_per_space_across_relaunch
+          - ble_uses_notify_or_client_write_according_to_connection_direction_without_duplicate_routes
+          - ble_best_effort_carries_calls_and_voice_up_to_64_kib_with_authenticated_space_payloads
+          - larger_voice_uses_backend_outbox_and_inbox_only
+        api:
+          inbox: GET /v1/spaces/{spaceID}/events?deviceID={UUID}&cursor={optional}
+          inbox_authentication: X-Space-Secret
+          inbox_response: events cursor hasMore with at_most_100_events
+          ack: POST /v1/spaces/{spaceID}/events/{eventID}/ack with JSON deviceID
+          send_acceptance: HTTP_202_queued_or_HTTP_200_acknowledged_preserves_event_id
+      verification:
+        source_diff_integrity: passed
+        focused_jvm_tests: passed
+        assemble_debug: passed
+        two_physical_android_runtime: passed_for_two_phone_roster_and_bidirectional_selected_calls
+      known_runtime_limits:
+        - voice_payloads_over_64_kib_are_not_sent_over_ble
+        - no_lan_transport_is_currently_implemented
+        - production_inbox_and_general_role_runtime_remain_blocked_until_the_verified_server_change_is_deployed

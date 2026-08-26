@@ -61,6 +61,52 @@ data class DirectUpdateState(
     val message: String = "업데이트를 확인할 수 있어요.",
 )
 
+enum class SpaceHubUpdateAction { CHECK, DOWNLOAD, CANCEL, INSTALL, RETRY, NONE }
+
+data class SpaceHubUpdatePresentation(
+    val buttonLabel: String,
+    val statusText: String?,
+    val enabled: Boolean,
+    val showProgress: Boolean,
+    val action: SpaceHubUpdateAction,
+)
+
+fun spaceHubUpdatePresentation(state: DirectUpdateState): SpaceHubUpdatePresentation = when (state.phase) {
+    UpdatePhase.IDLE -> SpaceHubUpdatePresentation(
+        "최신 버전 확인", null, true, false, SpaceHubUpdateAction.CHECK,
+    )
+    UpdatePhase.CHECKING -> SpaceHubUpdatePresentation(
+        "확인 중…", null, false, true, SpaceHubUpdateAction.NONE,
+    )
+    UpdatePhase.CURRENT -> SpaceHubUpdatePresentation(
+        "최신 버전이에요", null, false, false, SpaceHubUpdateAction.NONE,
+    )
+    UpdatePhase.AVAILABLE -> SpaceHubUpdatePresentation(
+        "버전 ${state.version ?: "-"} 다운로드",
+        "새 버전 ${state.version ?: "-"}이 있어요.",
+        true,
+        false,
+        SpaceHubUpdateAction.DOWNLOAD,
+    )
+    UpdatePhase.DOWNLOADING -> SpaceHubUpdatePresentation(
+        "다운로드 취소", state.message, true, true, SpaceHubUpdateAction.CANCEL,
+    )
+    UpdatePhase.READY -> SpaceHubUpdatePresentation(
+        "설치 화면 열기",
+        "파일 확인이 끝났어요. Android 설치 화면에서 계속하세요.",
+        true,
+        false,
+        SpaceHubUpdateAction.INSTALL,
+    )
+    UpdatePhase.ERROR -> SpaceHubUpdatePresentation(
+        "다시 확인",
+        "확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.",
+        true,
+        false,
+        SpaceHubUpdateAction.RETRY,
+    )
+}
+
 private data class ReleaseAsset(
     val tag: String,
     val version: String,
@@ -373,7 +419,7 @@ fun DirectUpdateSettings(manager: DirectUpdateManager) {
     }
 }
 
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is android.content.ContextWrapper -> baseContext.findActivity()
     else -> null

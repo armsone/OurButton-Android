@@ -39,7 +39,9 @@ class MainActivity : ComponentActivity() {
         hardware.onAcknowledge = model::presentAcknowledge
         hardware.onTransportStatus = model::updateTransport
         hardware.onPresence = model::updateRemoteMember
+        hardware.onPresenceLost = model::markRemoteMemberDisconnected
         hardware.onMembers = model::replaceRemoteMembers
+        hardware.onNotificationMuteStatus = model::updateNotificationMuteStatus
         pendingWidgetAction = intent.getStringExtra(EXTRA_WIDGET_ACTION)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {

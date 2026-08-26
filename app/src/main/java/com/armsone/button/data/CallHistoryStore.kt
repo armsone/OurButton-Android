@@ -11,16 +11,28 @@ import java.util.UUID
 class PendingVoiceStore(context: Context) {
     private val preferences = context.getSharedPreferences("button_pending_voice", Context.MODE_PRIVATE)
 
-    fun record(eventID: UUID) {
-        preferences.edit().putString("eventID", eventID.toString()).apply()
+    fun record(eventID: UUID, spaceID: UUID) {
+        preferences.edit().putString(spaceID.toString(), eventID.toString()).apply()
     }
 
-    fun take(): UUID? {
-        val value = preferences.getString("eventID", null)
+    fun take(spaceID: UUID, history: List<CallHistoryEntry>): UUID? {
+        val key = spaceID.toString()
+        val scoped = preferences.getString(key, null)
+        if (scoped != null) {
+            preferences.edit().remove(key).apply()
+            return runCatching { UUID.fromString(scoped) }.getOrNull()
+        }
+
+        // Preserve the single-value format from older installs until its own room is opened.
+        val legacy = preferences.getString("eventID", null)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return null
+        if (history.none { it.id == legacy && it.spaceID == spaceID }) return null
         preferences.edit().remove("eventID").apply()
-        return value?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        return legacy
     }
 
+    fun clear(spaceID: UUID) = preferences.edit().remove(spaceID.toString()).apply()
     fun clear() = preferences.edit().clear().apply()
 }
 

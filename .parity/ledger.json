@@ -1,0 +1,426 @@
+{
+  "ledger_version": 1,
+  "rows": [
+    {
+      "id": "setup_create_join.space_records.persistence",
+      "route_state": "setup_create_join",
+      "element": "space_records",
+      "dimension": "create or join activates one space while preserving all others across relaunch",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple stores the active FamilyRoomMembership independently while retaining roomMemberships",
+        "location": "/Users/armsone/git/button/iOS/iOS/ViewModels/AppModel.swift:290"
+      },
+      "target_observation": "Android source and JVM persistence tests cover create, join, damaged-entry recovery, and multiple saved rooms; no two-device runtime trace was captured",
+      "implementation_ref": "app/src/main/java/com/armsone/button/state/AppViewModel.kt:219",
+      "fixture": "space_lifecycle_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "preserved room collection, active selection, known role, and tolerant persisted-state decoding; added focused JVM coverage",
+          "result": "source and tests pass; runtime create/join/relaunch trace remains absent"
+        }
+      ],
+      "reopen_history": []
+    },
+    {
+      "id": "space_selection.active_space.action",
+      "route_state": "space_selection",
+      "element": "saved_space_row",
+      "dimension": "open the first-launch-style hub from home top-left, show every saved space and current state, then switch immediately and reconnect after relaunch",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple parent and child home top-left actions open SpaceSelectionView with saved spaces, create, join, and current invite QR",
+        "location": "/Users/armsone/git/button/iOS/iOS/Views/SpaceSelectionView.swift:13"
+      },
+      "target_observation": "Android home top-left opens a dedicated Space Selection hub; settings no longer owns switch/create/join. Source persists selection and reconnects, but no hub interaction trace or phone/tablet/TV paired capture exists",
+      "implementation_ref": "app/src/main/java/com/armsone/button/ui/ButtonApp.kt:351",
+      "fixture": "space_selection_hub_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "made switch and leave-next-room transitions atomic and persisted the selected active room",
+          "result": "source and relaunch test pass; runtime interaction and visual evidence remain open"
+        },
+        {
+          "attempt": 2,
+          "date": "2026-08-26",
+          "action": "moved switching/create/join from settings into the home top-left Space Selection hub and retained current invite QR",
+          "result": "Android UI-state tests and build pass; installed package launched, but no post-change hub capture or tap trace was collected"
+        }
+      ],
+      "reopen_history": []
+    },
+    {
+      "id": "voice_send.active_space.routing",
+      "route_state": "voice_send",
+      "element": "voice_message",
+      "dimension": "record and send with the captured active space ID, secret, sender, and role",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple sendEvent binds the current space credentials and persists/retries the same event",
+        "location": "/Users/armsone/git/button/iOS/iOS/ViewModels/AppModel.swift:567"
+      },
+      "target_observation": "The earlier Android voice non-arrival was reproduced as a BLE direction defect: connected central peers were counted as live but transmit only notified subscribed centrals. Android now routes once by notify or client write, carries authenticated voice up to 64 KiB, and preserves the captured active-space target. On final APK, selected voice passed with identical eventID and persisted audio in both directions before and after reverse-order relaunch; larger voice still requires the undeployed production backend inbox.",
+      "implementation_ref": "app/src/main/java/com/armsone/button/state/AppViewModel.kt:84",
+      "fixture": "voice_space_snapshot_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [
+        {
+          "id": "android_selected_voice_received_sm_f968n_20260826",
+          "type": "other",
+          "path": "/Users/armsone/git/button-Android/.sync/evidence/rep-selected-voice-received.png",
+          "sha256": "19cb49f140b8886e9bf56bd4f0ed025205595f20984e4ad6c0fff9001d1cf583"
+        }
+      ],
+      "status": "reopened",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "captured outbound credentials before asynchronous transport and prevented recorder callbacks from crossing a room switch",
+          "result": "source, coding tests, and build pass; live voice transport trace remains open"
+        },
+        {
+          "attempt": 2,
+          "date": "2026-08-26",
+          "action": "correlated SM_F968N history, process logcat, production membership/inbox, BLE voice branch, Firebase packaging, and focused voice codec/storage tests",
+          "result": "event non-arrival confirmed: no 김부장 voice history entry, no production inbox route, no Firebase default app, and voice is excluded from BLE; 16 focused codec/history tests pass"
+        },
+        {
+          "attempt": 3,
+          "date": "2026-08-26",
+          "action": "added bounded BLE voice fallback and symmetric notify/client-write routing, then update-installed both phones and exercised selected voice in both directions before and after reverse-order relaunch",
+          "result": "four selected voice sends passed with identical sender/receiver eventID and nonempty persisted M4A; broadcast voice also passed after reconnect; production over-64-KiB recovery remains open"
+        }
+      ],
+      "reopen_history": [
+        {
+          "date": "2026-08-26",
+          "observed_by": "user live cross-device report",
+          "description": "the same 김부장 voice reached iPhone but not SM_F968N while ding-dong continued to reach Android"
+        }
+      ]
+    },
+    {
+      "id": "voice_send.error.delivery_confirmation",
+      "route_state": "voice_send_error",
+      "element": "delivery_feedback",
+      "dimension": "show sent only after reachable backend delivery and retain retryable voice on failure",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple reports queued or transport errors separately from confirmed send completion",
+        "location": "/Users/armsone/git/button/iOS/iOS/ViewModels/AppModel.swift:599"
+      },
+      "target_observation": "A reopened Android capture showed a durable selected member followed by a blocking no-route modal. Android now persists the same eventID before transport, shows 전송 대기 without a blocking recoverable error, retries the outbox, and polls/deduplicates/ACKs the server inbox. Post-change two-phone behavior remains uncaptured and production awaits server deployment",
+      "implementation_ref": "app/src/main/java/com/armsone/button/platform/AndroidHardwareGateway.kt:300",
+      "fixture": "backend_delivery_receipt_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [
+        {
+          "id": "android_no_route_modal_prechange_20260826",
+          "type": "other",
+          "path": "/var/folders/rv/0t_xs0tj4s3843vr2v_djbm40000gn/T/IMAGE 2026-08-26 12:40:55.jpg",
+          "sha256": "7e42048b39f1f49d2646aefda36897ac718592fce353c2f256d0b0202bd9b6f4"
+        }
+      ],
+      "status": "reopened",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "removed configured-backend BLE false success, required delivered > 0, added bounded retry and recoverable Korean error text",
+          "result": "backend client tests pass; live success/failure traces and screenshot evidence remain open"
+        }
+      ],
+      "reopen_history": [
+        {
+          "date": "2026-08-26",
+          "observed_by": "user supplied Android screenshot",
+          "description": "Selecting visible durable member 김부장 then tapping 톡톡 opened a blocking 전송 안내 claiming that no device was deliverable"
+        }
+      ]
+    },
+    {
+      "id": "presence_list.current_device_notification_mute",
+      "route_state": "presence_list",
+      "element": "current_device_member_row",
+      "dimension": "toggle and persist per-space notification mute with honest pending/error state and exact remote member status",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple current-member row toggles a durable per-space mute setting and exposes pending/error state without claiming remote confirmation",
+        "location": "/Users/armsone/git/button/iOS/iOS/ViewModels/AppModel.swift:273"
+      },
+      "target_observation": "Android current row is touch, D-pad, and accessibility actionable; local state persists immediately and WorkManager applies the idempotent existing-device POST. No paired post-change captures or offline runtime trace exist",
+      "implementation_ref": "app/src/main/java/com/armsone/button/state/AppViewModel.kt:608",
+      "fixture": "notification_mute_ui_state_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "implemented per-space local preference, sequential network-constrained retry work, exact status text, and actionable row semantics",
+          "result": "Android UI-state/backend tests and build pass; installed phone package launched as a task, but no toggle interaction/capture was performed"
+        }
+      ],
+      "reopen_history": []
+    },
+    {
+      "id": "incoming_alert.notification_mute_suppression",
+      "route_state": "incoming_alert",
+      "element": "audible_visible_voice_presentation",
+      "dimension": "while this device is muted for the event space, preserve the event and voice history but suppress app-owned sound, flash, foreground card, notification, and automatic voice playback",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple routes authenticated events through per-space mute suppression while retaining history and recovery state",
+        "location": "/Users/armsone/git/button/iOS/iOS/ViewModels/AppModel.swift:962"
+      },
+      "target_observation": "Android records authenticated BLE/FCM events before a shared mute guard and avoids foreground/background presentation and pending auto-play. No live muted call/voice behavior trace exists",
+      "implementation_ref": "app/src/main/java/com/armsone/button/platform/AndroidHardwareGateway.kt:470",
+      "fixture": "notification_mute_suppression_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "shared the incoming-alert predicate across BLE/foreground and FCM/background paths and retained history before suppression",
+          "result": "predicate/UI-state JVM tests and build pass; no two-device call/voice runtime or visual evidence was captured"
+        }
+      ],
+      "reopen_history": []
+    },
+    {
+      "id": "notification_mute.sync_error.inline_nonblocking",
+      "route_state": "space_selection_and_presence_list",
+      "element": "notification_mute_sync_status",
+      "dimension": "recoverable automatic mute synchronization remains queued and appears only as compact inline syncing or sync-needed state without repeated blocking modal",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple activation retry preserves the pending desired state and renders 동기화 필요 inline without assigning global errorMessage",
+        "location": "/Users/armsone/git/button/iOS/iOS/Views/Shared/UIComponents.swift:331"
+      },
+      "target_observation": "Android WorkManager retains local desired state across offline retry and updates own row/hub with 동기화 중 or 동기화 필요; the state reducer never creates errorMessage. No forced-offline UI trace exists",
+      "implementation_ref": "app/src/main/java/com/armsone/button/state/AppViewModel.kt:95",
+      "fixture": "notification_mute_nonblocking_error_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "kept recoverable worker failures in per-space inline state and added a regression that global errorMessage remains null",
+          "result": "Apple 13/13 and Android focused 51/51 tests reported passing; forced offline rendered behavior remains uncaptured"
+        }
+      ],
+      "reopen_history": []
+    },
+    {
+      "id": "space_selection.latest_version_check.action",
+      "route_state": "space_selection",
+      "element": "bottom_update_check",
+      "dimension": "bottommost full-width latest-version check presents truthful checking, current, available, safe next-action, and retry states through the platform's existing official update route",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple Space Selection bottom section uses AppUpdateChecker and renders 최신 버전 확인, 확인 중…, 최신 버전이에요, versioned official-destination action, and retry",
+        "location": "/Users/armsone/git/button/iOS/iOS/Views/SpaceSelectionView.swift:75"
+      },
+      "target_observation": "Android Space Selection appends a full-width state-driven action that reuses DirectUpdateManager; AVAILABLE begins the existing verified download route and INSTALL appears only after APK verification. No rendered state catalog or live official-release check trace exists",
+      "implementation_ref": "app/src/main/java/com/armsone/button/ui/ButtonApp.kt:410",
+      "fixture": "space_hub_update_states_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "mapped existing updater phases to the bottom hub action and covered default, checking, current, available, verified handoff, and actionable error text in JVM tests",
+          "result": "source/UI-state tests pass; no phone/tablet/TV capture or controlled network/release runtime trace was collected"
+        }
+      ],
+      "reopen_history": []
+    },
+    {
+      "id": "presence_list.durable_member_consistency",
+      "route_state": "presence_list",
+      "element": "member_set_and_counts",
+      "dimension": "every device in one space shows the same durable deviceID-deduplicated member set while nearby BLE presence remains a separate live count",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple unions local self with authoritative /members, deduplicates deviceID, augments live state with BLE, and rejects stale old-space responses",
+        "location": "/Users/armsone/git/button/iOS/iOS/ViewModels/AppModel.swift:959"
+      },
+      "target_observation": "Three reopened captures of one space showed 1, 2, and 3 members. Android now unions local self, authoritative /members, and authenticated same-space stable sender IDs, reconciles strictly by deviceID, rejects stale responses, and never substitutes names or event IDs. BLE disconnect changes only live status while the durable card remains. Home pull-to-refresh and a visible 30-second cadence coalesce registration, members, status, inbox, and outbox recovery with bounded spinner and stale-space rejection; TV has a focusable 새로고침 action. Final SM-S928N and SM_F968N captures both show the same three names and separate 근처 2대 / 구성원 3명 counts; authoritative production membership and tablet/TV visuals remain open.",
+      "implementation_ref": "app/src/main/java/com/armsone/button/state/AppViewModel.kt:70",
+      "fixture": "member_consistency_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [
+        {
+          "id": "android_members_2_prechange_20260826",
+          "type": "other",
+          "path": "/var/folders/rv/0t_xs0tj4s3843vr2v_djbm40000gn/T/IMAGE 2026-08-26 12:39:16.jpg",
+          "sha256": "b84daddffb18895d54d91c531ff77d023bfb5b85017202c815a7fc9a411c4ebd"
+        },
+        {
+          "id": "apple_members_1_prechange_20260826",
+          "type": "other",
+          "path": "/var/folders/rv/0t_xs0tj4s3843vr2v_djbm40000gn/T/IMAGE 2026-08-26 12:39:19.jpg",
+          "sha256": "733a22a9e5911373f8b7386ab015ddb71d62aa67170148a481482075b3868019"
+        },
+        {
+          "id": "android_members_3_prechange_20260826",
+          "type": "other",
+          "path": "/var/folders/rv/0t_xs0tj4s3843vr2v_djbm40000gn/T/IMAGE 2026-08-26 12:39:23.jpg",
+          "sha256": "c84d8be3f875339d3fe95f9c19e1cb3a6254c0095b2a34bc95e9e71df47c42db"
+        },
+        {
+          "id": "android_sm_s928n_members_3_postchange_20260826",
+          "type": "other",
+          "path": "/Users/armsone/git/button-Android/.sync/evidence/kim-members-final.png",
+          "sha256": "432425be26b1562be201cb3f87bfc377f7130279eeaafaf3db4b08ffcb78da54"
+        },
+        {
+          "id": "android_sm_f968n_members_3_postchange_20260826",
+          "type": "other",
+          "path": "/Users/armsone/git/button-Android/.sync/evidence/rep-members-final.png",
+          "sha256": "9df27debd39a1a4fa3754647e7993920c9ca0a194215d15b41f15251a6a0ad03"
+        }
+      ],
+      "status": "reopened",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "separated durable membership from BLE live presence, added deterministic refresh generation gating, and covered equal three-device sets",
+          "result": "focused source tests pass; post-change three-device runtime evidence is absent"
+        },
+        {
+          "attempt": 2,
+          "date": "2026-08-26",
+          "action": "compared the installed phone active-space hash, local membership, same-space history, and production /members response without exposing secrets",
+          "result": "김부장 sent five recent events in the same active space but has no authoritative server membership row; production returned only 대표 아이폰 while local self is synthesized, so the client correctly cannot render 김부장 as durable"
+        },
+        {
+          "attempt": 3,
+          "date": "2026-08-26",
+          "action": "persisted only authenticated same-space sender deviceIDs as known members and reconciled later authoritative rows by stable deviceID, then captured both Android phones after update install",
+          "result": "SM-S928N and SM_F968N both expose 김부장, 대표, 대표 아이폰 and 구성원 3명; production authoritative membership and tablet/TV visual evidence remain open"
+        },
+        {
+          "attempt": 4,
+          "date": "2026-08-26",
+          "action": "wired authenticated BLE peer disconnects to immutable durable-card state updates and added coalesced pull/resume/30-second refresh with bounded completion and TV action",
+          "result": "fake-clock, cancel/resume, coalescing, stale-space, mute/server reconciliation, and connect-disconnect state tests pass; SM_F968N retains three cards after final update install"
+        }
+      ],
+      "reopen_history": [
+        {
+          "date": "2026-08-26",
+          "observed_by": "user supplied cross-device screenshots",
+          "description": "the same space displayed inconsistent durable member counts of 1, 2, and 3"
+        }
+      ]
+    },
+    {
+      "id": "presence_list.compact_member_card.readability",
+      "route_state": "presence_list",
+      "element": "member_card",
+      "dimension": "compact phones render one full-width member card with a visible name first and one combined role · notification · live metadata line",
+      "classification": "content_state",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple compact member cards use adaptive full-width rows, two-line names, and separate role, live, notification, and own sync states",
+        "location": "/Users/armsone/git/button/iOS/iOS/Views/Shared/UIComponents.swift:240"
+      },
+      "target_observation": "Installed SM-S928N and SM_F968N captures and accessibility hierarchies show all actual names 김부장, 대표, 대표 아이폰 as visible nodes in full-width cards with explicit charcoal contrast. Each card uses row 1 name and row 2 역할 · 알림 · live state. Tablet/TV and paired Apple/Android post-change captures remain open",
+      "implementation_ref": "app/src/main/java/com/armsone/button/ui/ButtonApp.kt:740",
+      "fixture": "member_card_layout_state_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [
+        {
+          "id": "android_compact_truncation_prechange_20260826",
+          "type": "other",
+          "path": "/var/folders/rv/0t_xs0tj4s3843vr2v_djbm40000gn/T/IMAGE 2026-08-26 12:39:19.jpg",
+          "sha256": "733a22a9e5911373f8b7386ab015ddb71d62aa67170148a481482075b3868019"
+        },
+        {
+          "id": "android_sm_f968n_member_names_visible_postchange_20260826",
+          "type": "other",
+          "path": "/Users/armsone/git/button-Android/.sync/evidence/button-member-name-visible-sm-f968n-20260826.png",
+          "sha256": "c9a30e51f5cf6769bb50e015f2a5935bf1b5390c401ecc0fd7ed6a5b29df16c3"
+        }
+      ],
+      "status": "reopened",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "changed compact membership layout to full-width rows and preserved long names without ellipsis",
+          "result": "layout-state JVM coverage passes; rendered post-change comparison remains open"
+        },
+        {
+          "attempt": 2,
+          "date": "2026-08-26",
+          "action": "made name fallback/trim mapping explicit, removed the hard maxLines cap, set explicit charcoal contrast, rebuilt, update-installed, and inspected pixels plus accessibility hierarchy on SM_F968N",
+          "result": "actual names 대표 and 대표 아이폰 are visibly rendered and exposed as accessibility nodes; tablet/TV and paired capture remain open"
+        }
+      ],
+      "reopen_history": [
+        {
+          "date": "2026-08-26",
+          "observed_by": "user supplied compact screenshots",
+          "description": "two-column cards truncated member names and combined status text"
+        }
+      ]
+    },
+    {
+      "id": "roles.general.parent_behavior",
+      "route_state": "role_selection_and_home",
+      "element": "general_role",
+      "dimension": "general is persisted and transmitted as general, shown as 일반, and uses parent behavior except for its label",
+      "classification": "functional",
+      "source_ref": {
+        "kind": "source",
+        "value": "Apple preserves wire general, renders 일반, and routes it through parent navigation and send behavior",
+        "location": "/Users/armsone/git/button/iOS/iOS/Models/FamilyRole.swift:4"
+      },
+      "target_observation": "Android enum/coder/backend/UI mappings cover general and route it through parent home behavior; no role-selection or cross-device runtime capture exists",
+      "implementation_ref": "app/src/main/java/com/armsone/button/model/FamilyRole.kt:22",
+      "fixture": "general_role_jvm_20260826",
+      "fallback_capable": false,
+      "evidence": [],
+      "status": "implemented_source_only",
+      "attempts": [
+        {
+          "attempt": 1,
+          "date": "2026-08-26",
+          "action": "added backward-compatible general wire coding, UI label, persistence, membership, event, and parent-behavior routing",
+          "result": "focused role/backend tests pass; runtime capture remains open"
+        }
+      ],
+      "reopen_history": []
+    }
+  ]
+}
