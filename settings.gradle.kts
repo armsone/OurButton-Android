@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Button"
+rootProject.name = "OurButton-Android"
 include(":app")

@@ -4,16 +4,16 @@ plugins {
 }
 
 android {
-    namespace = "com.armsone.button"
+    namespace = "com.armsone.ourbutton"
     compileSdk = 37
 
     defaultConfig {
         applicationId = "com.armsone.button"
         minSdk = 26
         targetSdk = 37
-        versionCode = 346493
-        versionName = "2.0.2"
-        buildConfigField("String", "BUILD_NUMBER", "\"202608291453\"")
+        versionCode = 346907
+        versionName = "2.1.0"
+        buildConfigField("String", "BUILD_NUMBER", "\"202608292118\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -31,6 +31,10 @@ android {
 
     buildTypes {
         release {
+            // Existing installs on physical devices carry the debug-keystore signature
+            // (no dedicated release signingConfig has ever been wired here); keep using it
+            // so overwrite installs stay signature-compatible.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

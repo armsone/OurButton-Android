@@ -104,7 +104,7 @@
     {"id":"settings_role_reset","source":"Views/SettingsView.swift; ViewModels/AppModel.swift","class":"Functional","status":"source-only"},
     {"id":"settings_rooms","source":"Views/SettingsView.swift; ViewModels/AppModel.swift; Services/PushRegistrationService.swift","class":"Visual/Content/state/Functional/Transport","status":"implemented-from-source; inactive-room-live-push-required"},
     {"id":"root_send_error","source":"Views/RootView.swift","class":"Visual/Functional","status":"source-only"},
-    {"id":"widget_voice_entry","source":"Views/RootView.swift; ButtonWidget/ButtonWidget.swift","class":"Functional","status":"implemented-for-parent-and-child; launcher-host-verification-required"},
+    {"id":"widget_voice_entry","source":"Views/RootView.swift; OurButtonWidget/OurButtonWidget.swift","class":"Functional","status":"implemented-for-parent-and-child; launcher-host-verification-required"},
     {"id":"parent_tablet_landscape","source":"Views/Parent/ParentHomeView.swift; Views/Shared/UIComponents.swift","class":"Visual","status":"source-only"},
     {"id":"child_large_text","source":"Views/Child/ChildHomeView.swift","class":"Visual/Functional","status":"source-only"}
   ],

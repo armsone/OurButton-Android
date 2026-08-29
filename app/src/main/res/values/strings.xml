@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">버튼</string>
+    <string name="app_name">OurButton</string>
     <string name="parent_widget_name">부모 버튼</string>
     <string name="parent_widget_description">같은 공간 가족에게 바로 호출해요.</string>
     <string name="child_widget_name">자녀 버튼</string>
