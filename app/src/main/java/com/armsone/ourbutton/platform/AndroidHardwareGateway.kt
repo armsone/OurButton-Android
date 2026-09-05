@@ -220,6 +220,7 @@ class AndroidHardwareGateway(private val activity: ComponentActivity) : AppHardw
                         retryPendingOutbox(it)
                     }
                 }
+                pushRegistration.requestTokenAndRegister()
             }
         }
         if (state.phase != AppPhase.HOME || state.invite == null || state.isDemoMode) {

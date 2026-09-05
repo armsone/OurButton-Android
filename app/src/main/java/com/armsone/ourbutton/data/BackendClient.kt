@@ -75,6 +75,8 @@ interface BackendClient {
     suspend fun setNotificationsMuted(space: FamilySpace, deviceId: UUID, muted: Boolean)
 }
 
+data class RemoteSpaceSnapshot(val name: String?, val members: List<RemoteFamilyMember>)
+
 data class RemoteFamilyMember(
     val deviceID: UUID,
     val name: String,
@@ -106,6 +108,7 @@ class HttpBackendClient(private val configuration: BackendConfiguration) : Backe
     ) {
         val body = JSONObject()
             .put("spaceID", space.id.toString())
+            .put("spaceName", space.name)
             .put("secret", space.secret)
             .put("deviceID", deviceId.toString())
             .put("name", name)
@@ -139,11 +142,13 @@ class HttpBackendClient(private val configuration: BackendConfiguration) : Backe
     override suspend fun fetchEvent(id: UUID, space: FamilySpace): CallEvent =
         CallEventCoder.decode(request("v1/spaces/${space.id}/calls/$id", "GET", space.secret))
 
-    override suspend fun fetchMembers(space: FamilySpace): List<RemoteFamilyMember> {
+    override suspend fun fetchMembers(space: FamilySpace): List<RemoteFamilyMember> = fetchSpaceSnapshot(space).members
+
+    suspend fun fetchSpaceSnapshot(space: FamilySpace): RemoteSpaceSnapshot {
         val response = JSONObject(String(request(
             "v1/spaces/${space.id}/members", "GET", space.secret,
         )))
-        return response.getJSONArray("members").mapObjects { member ->
+        val members = response.getJSONArray("members").mapObjects { member ->
             RemoteFamilyMember(
                 deviceID = UUID.fromString(member.getString("deviceID")),
                 name = member.getString("name"),
@@ -152,6 +157,7 @@ class HttpBackendClient(private val configuration: BackendConfiguration) : Backe
                 notificationsMuted = member.optBoolean("notificationsMuted", false),
             )
         }
+        return RemoteSpaceSnapshot(response.optString("spaceName").takeIf { it.isNotBlank() }, members)
     }
 
     override suspend fun fetchInbox(
@@ -188,6 +194,7 @@ class HttpBackendClient(private val configuration: BackendConfiguration) : Backe
     override suspend fun setNotificationsMuted(space: FamilySpace, deviceId: UUID, muted: Boolean) {
         val body = JSONObject()
             .put("spaceID", space.id.toString())
+            .put("spaceName", space.name)
             .put("secret", space.secret)
             .put("deviceID", deviceId.toString())
             .put("platform", "android")

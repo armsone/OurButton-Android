@@ -77,6 +77,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.armsone.ourbutton.data.AdminSpace
+import com.armsone.ourbutton.data.AdminMember
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -199,7 +202,7 @@ fun OurButtonApp(model: AppViewModel) {
                         }
                 }
             }, trailing = {
-                if (state.phase == AppPhase.HOME && state.route == AppRoute.WELCOME) {
+                if (state.route == AppRoute.WELCOME) {
                     ToolbarButton(Icons.Default.Settings, "설정", "open_settings") { model.navigate(AppRoute.SETTINGS) }
                 }
             }) {
@@ -1213,12 +1216,89 @@ private fun SettingsScreen(state: AppUiState, model: AppViewModel) {
         SettingsSection(null) {
             DirectUpdateSettings(updateManager)
         }
+        Spacer(Modifier.height(24.dp))
+        AdminSettings(state, model)
     }
     if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false },
         title = { Text("공간을 나가면 이 기기의 설정이 초기화돼요.") },
         confirmButton = { TextButton(onClick = { confirmLeave = false; model.leaveSpace() }, modifier = Modifier.testTag("confirm_leave")) {
             Text("공간 나가기", color = Red) } },
         dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("취소") } })
+}
+
+@Composable
+private fun AdminSettings(state: AppUiState, model: AppViewModel) {
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<AdminSpace?>(null) }
+    var newName by remember { mutableStateOf("") }
+    var deleting by remember { mutableStateOf<AdminSpace?>(null) }
+    var roleTarget by remember { mutableStateOf<Pair<AdminSpace, AdminMember>?>(null) }
+    SettingsHeader("관리자 모드", Icons.Default.SupervisorAccount)
+    SettingsSection(null) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!state.adminLoggedIn) {
+                OutlinedTextField(username, { username = it }, label = { Text("관리자 아이디") },
+                    singleLine = true, enabled = !state.adminBusy, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(password, { password = it }, label = { Text("비밀번호") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true, enabled = !state.adminBusy, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { model.adminLogin(username, password); password = "" },
+                    enabled = !state.adminBusy && username.isNotBlank() && password.isNotBlank()) { Text("관리자 로그인") }
+            } else {
+                Text("전체 공간 ${state.adminSpaces.size}개", fontWeight = FontWeight.SemiBold)
+                Text("공간에 참여하지 않고 관리해요. 관리 중인 공간의 참여자 목록과 알림 대상에는 추가되지 않아요.",
+                    fontSize = 12.sp, color = Secondary)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = model::refreshAdminSpaces, enabled = !state.adminBusy) { Text("새로고침") }
+                    TextButton(onClick = model::adminLogout, enabled = !state.adminBusy) { Text("관리자 로그아웃") }
+                }
+                if (state.adminSpaces.isEmpty() && !state.adminBusy) Text("등록된 공간이 없어요.", color = Secondary)
+                state.adminSpaces.forEach { room ->
+                    HorizontalDivider()
+                    Text(room.name, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                    Text("참여자 ${room.members.size}명", fontSize = 12.sp, color = Secondary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { renaming = room; newName = room.name }, enabled = !state.adminBusy) { Text("이름 변경") }
+                        TextButton(onClick = { deleting = room }, enabled = !state.adminBusy) { Text("공간 삭제", color = Red) }
+                    }
+                    room.members.forEach { member ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(member.name, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { roleTarget = room to member }, enabled = !state.adminBusy) {
+                                Text(when (member.role) { "parent" -> "부모"; "child" -> "자녀"; else -> "일반" })
+                            }
+                        }
+                    }
+                }
+            }
+            if (state.adminBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            state.adminError?.let { Text(it, color = Red, fontSize = 13.sp) }
+        }
+    }
+    renaming?.let { room ->
+        AlertDialog(onDismissRequest = { renaming = null }, title = { Text("공간 이름 변경") },
+            text = { OutlinedTextField(newName, { newName = it.take(80) }, singleLine = true, label = { Text("공간 이름") }) },
+            confirmButton = { TextButton(onClick = { model.renameAdminSpace(room.spaceID, newName); renaming = null }, enabled = newName.isNotBlank()) { Text("변경") } },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text("취소") } })
+    }
+    deleting?.let { room ->
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("공간 삭제") },
+            text = { Text("‘${room.name}’ 공간을 삭제할까요? 모든 참여자가 이 공간을 더 이상 사용할 수 없어요.") },
+            confirmButton = { TextButton(onClick = { model.deleteAdminSpace(room.spaceID); deleting = null }) { Text("공간 삭제", color = Red) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("취소") } })
+    }
+    roleTarget?.let { (room, member) ->
+        AlertDialog(onDismissRequest = { roleTarget = null }, title = { Text("${member.name} 역할 변경") },
+            text = { Column {
+                listOf("parent" to "부모", "child" to "자녀", "general" to "일반").forEach { (role, title) ->
+                    TextButton(onClick = { model.changeAdminRole(room.spaceID, member.deviceID, role); roleTarget = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (role == member.role) "$title · 현재 역할" else title)
+                    }
+                }
+            } }, confirmButton = {}, dismissButton = { TextButton(onClick = { roleTarget = null }) { Text("취소") } })
+    }
 }
 
 @Composable

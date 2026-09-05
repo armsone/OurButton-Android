@@ -147,7 +147,7 @@ class PushRegistrationManager internal constructor(
     companion object {
         fun registrationFingerprint(token: String?, memberships: List<PushMembership>): String {
             val parts = memberships.sortedBy { it.space.id.toString() }.flatMap { membership -> listOf(
-                membership.space.id, membership.space.secret, membership.deviceID,
+                membership.space.id, membership.space.name, membership.space.secret, membership.deviceID,
                 membership.name, membership.role.rawValue,
             ) }
             val bytes = (listOf(token.orEmpty()) + parts).joinToString("\u0000").toByteArray()

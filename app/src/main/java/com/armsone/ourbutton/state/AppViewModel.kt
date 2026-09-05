@@ -4,6 +4,13 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.armsone.ourbutton.data.AdminClient
+import com.armsone.ourbutton.data.AdminSpace
+import com.armsone.ourbutton.data.AdminRequestException
+import com.armsone.ourbutton.data.BackendConfiguration
+import com.armsone.ourbutton.data.BackendException
+import com.armsone.ourbutton.data.HttpBackendClient
+import com.armsone.ourbutton.push.DeviceIdentity
 import com.armsone.ourbutton.data.CallHistoryEntry
 import com.armsone.ourbutton.data.CallHistoryStore
 import com.armsone.ourbutton.data.PendingVoiceStore
@@ -256,6 +263,10 @@ data class AppUiState(
     val pushStatus: String = "요청하지 않음",
     val serverStatus: String = "구성되지 않음 (오프라인)",
     val isRefreshing: Boolean = false,
+    val adminLoggedIn: Boolean = false,
+    val adminBusy: Boolean = false,
+    val adminSpaces: List<AdminSpace> = emptyList(),
+    val adminError: String? = null,
 )
 
 class VisibleRefreshPolicy(private val intervalMillis: Long = 30_000L) {
@@ -354,6 +365,110 @@ class AppViewModel(
     private val knownMemberStore = KnownMemberStore(application)
     private val _uiState = MutableStateFlow(loadState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
+
+    private val adminClient = AdminClient(BackendConfiguration.load(application))
+    private val metadataClient = HttpBackendClient(BackendConfiguration.load(application))
+    private var adminToken: String? = null
+    private var roomSyncJob: Job? = null
+
+    fun adminLogin(username: String, password: String) {
+        if (_uiState.value.adminBusy || username.isBlank() || password.isBlank()) return
+        _uiState.update { it.copy(adminBusy = true, adminError = null) }
+        viewModelScope.launch {
+            try {
+                adminToken = adminClient.login(username.trim(), password)
+                _uiState.update { it.copy(adminLoggedIn = true) }
+                val rooms = adminClient.spaces(adminToken!!)
+                _uiState.update { it.copy(adminSpaces = rooms) }
+            } catch (error: Exception) { adminFailure(error) }
+            finally { _uiState.update { it.copy(adminBusy = false) } }
+        }
+    }
+
+    private fun adminFailure(error: Exception) {
+        if (error is AdminRequestException && error.status == 401) {
+            adminToken = null
+            _uiState.update { it.copy(adminLoggedIn = false, adminSpaces = emptyList()) }
+        }
+        _uiState.update { it.copy(adminError = error.message ?: "관리자 요청을 처리하지 못했어요.") }
+    }
+
+    private fun adminRequest(action: suspend (String) -> Unit) {
+        val token = adminToken ?: return
+        if (_uiState.value.adminBusy) return
+        _uiState.update { it.copy(adminBusy = true, adminError = null) }
+        viewModelScope.launch {
+            try {
+                action(token)
+                val rooms = adminClient.spaces(token)
+                _uiState.update { it.copy(adminSpaces = rooms) }
+                syncServerRooms()
+            } catch (error: Exception) { adminFailure(error) }
+            finally { _uiState.update { it.copy(adminBusy = false) } }
+        }
+    }
+
+    fun refreshAdminSpaces() = adminRequest { }
+    fun renameAdminSpace(spaceID: String, name: String) = adminRequest { adminClient.rename(it, spaceID, name.trim()) }
+    fun changeAdminRole(spaceID: String, deviceID: String, role: String) = adminRequest { adminClient.role(it, spaceID, deviceID, role) }
+    fun deleteAdminSpace(spaceID: String) = adminRequest { adminClient.delete(it, spaceID) }
+    fun adminLogout() {
+        val token = adminToken
+        adminToken = null
+        _uiState.update { it.copy(adminLoggedIn = false, adminSpaces = emptyList(), adminError = null) }
+        if (token != null) viewModelScope.launch { runCatching { adminClient.logout(token) } }
+    }
+
+    private fun syncServerRooms() {
+        if (roomSyncJob?.isActive == true || _uiState.value.fixtureId != null) return
+        val rooms = _uiState.value.rooms.toList()
+        roomSyncJob = viewModelScope.launch {
+            val ownID = DeviceIdentity.loadOrCreate(getApplication())
+            for (room in rooms) {
+                val space = runCatching { FamilySpace(UUID.fromString(room.invite.spaceId), room.invite.spaceName, room.invite.secret) }.getOrNull() ?: continue
+                try {
+                    val snapshot = metadataClient.fetchSpaceSnapshot(space)
+                    val ownRole = snapshot.members.firstOrNull { it.deviceID == ownID }?.role?.let { role ->
+                        when (role) { FamilyRole.Parent -> AppRole.PARENT; FamilyRole.Child -> AppRole.CHILD; FamilyRole.General -> AppRole.GENERAL }
+                    }
+                    _uiState.update { state ->
+                        val current = state.invite?.spaceId == room.invite.spaceId
+                        val name = snapshot.name ?: room.invite.spaceName
+                        state.copy(
+                            rooms = state.rooms.map { saved -> if (saved.invite.spaceId == room.invite.spaceId) saved.copy(invite = saved.invite.copy(spaceName = name), role = ownRole ?: saved.role) else saved },
+                            invite = if (current) state.invite?.copy(spaceName = name) else state.invite,
+                            spaceName = if (current) name else state.spaceName,
+                            role = if (current) ownRole ?: state.role else state.role,
+                            members = if (current && ownRole != null) state.members.map { if (it.isCurrentDevice) it.copy(role = ownRole) else it } else state.members,
+                        )
+                    }
+                    persist()
+                } catch (error: Exception) {
+                    if (error is BackendException.HttpError && error.code == 410) invalidateDeletedRoom(room.invite.spaceId)
+                }
+            }
+        }
+    }
+
+    private fun invalidateDeletedRoom(spaceID: String) {
+        val state = _uiState.value
+        val remaining = state.rooms.filterNot { it.invite.spaceId == spaceID }
+        if (remaining.size == state.rooms.size) return
+        if (state.invite?.spaceId == spaceID) {
+            cancelTransientWork()
+            val next = remaining.firstOrNull()
+            _uiState.value = state.copy(
+                rooms = remaining, invite = next?.invite, spaceName = next?.invite?.spaceName.orEmpty(),
+                displayName = next?.displayName.orEmpty(), role = next?.role,
+                phase = if (next == null) AppPhase.SETUP else if (next.role == null) AppPhase.ROLE_SELECTION else AppPhase.HOME,
+                route = AppRoute.WELCOME, members = emptyList(), selectedTargetIDs = emptySet(),
+                callHistory = next?.let { historyFor(it.invite.spaceId) }.orEmpty(),
+                showInvite = false, showVoice = false, incoming = null,
+                errorMessage = "관리자가 이 공간을 삭제했어요.",
+            )
+        } else _uiState.update { it.copy(rooms = remaining, errorMessage = "관리자가 저장된 공간을 삭제했어요.") }
+        if (remaining.isEmpty()) prefs.edit().remove("state").apply() else persist()
+    }
 
     private val sendCooldown = SendCooldown()
     private var cooldownJob: Job? = null
@@ -906,6 +1021,7 @@ class AppViewModel(
     }
 
     fun refreshHome() {
+        syncServerRooms()
         val spaceID = _uiState.value.invite?.spaceId ?: return
         if (_uiState.value.phase != AppPhase.HOME) return
         val token = homeRefreshGate.begin(spaceID) ?: return
