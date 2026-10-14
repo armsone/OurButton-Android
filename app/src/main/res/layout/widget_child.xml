@@ -5,12 +5,59 @@
     android:background="@drawable/widget_background"
     android:orientation="vertical"
     android:padding="4dp">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-        <TextView android:id="@+id/widget_quiet" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_gray" android:text="☝&#10;톡톡" android:textColor="#6D6D72" />
-        <TextView android:id="@+id/widget_ding" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_red" android:text="●&#10;띵동" android:textColor="#FF3B30" />
+    <TextView
+        android:id="@+id/widget_room_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:textColor="#8E8E93"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:visibility="gone" />
+    <LinearLayout
+        android:id="@+id/widget_button_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+            <TextView android:id="@+id/widget_quiet" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_gray" android:text="☝&#10;톡톡" android:textColor="#6D6D72" />
+            <TextView android:id="@+id/widget_ding" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_red" android:text="●&#10;띵동" android:textColor="#FF3B30" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+            <TextView android:id="@+id/widget_voice" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_orange" android:text="●&#10;음성" android:textColor="#FF9500" />
+            <TextView android:id="@+id/widget_open" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_blue" android:text="↗&#10;앱 열기" android:textColor="#4B76A3" />
+        </LinearLayout>
     </LinearLayout>
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-        <TextView android:id="@+id/widget_voice" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_orange" android:text="●&#10;음성" android:textColor="#FF9500" />
-        <TextView android:id="@+id/widget_open" style="@style/WidgetTile" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_margin="3dp" android:background="@drawable/widget_tile_blue" android:text="↗&#10;앱 열기" android:textColor="#4B76A3" />
+    <LinearLayout
+        android:id="@+id/widget_unconfigured_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/widget_unconfigured_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#302E2B"
+            android:text="@string/widget_unconfigured_title" />
+        <TextView
+            android:id="@+id/widget_unconfigured_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textSize="10sp"
+            android:textColor="#8E8E93"
+            android:layout_marginTop="4dp"
+            android:text="@string/widget_unconfigured_message" />
     </LinearLayout>
 </LinearLayout>

@@ -467,10 +467,13 @@ class AppViewModel(
                 errorMessage = "관리자가 이 공간을 삭제했어요.",
             )
         } else _uiState.update { it.copy(rooms = remaining, errorMessage = "관리자가 저장된 공간을 삭제했어요.") }
-        if (remaining.isEmpty()) prefs.edit().remove("state").apply() else persist()
+        if (remaining.isEmpty()) {
+            prefs.edit().remove("state").apply()
+            runCatching { com.armsone.ourbutton.widget.updateAllWidgets(getApplication()) }
+        } else persist()
     }
 
-    private val sendCooldown = SendCooldown()
+    private val sendCooldown = SendCooldown.shared
     private var cooldownJob: Job? = null
     private var quietHoldJob: Job? = null
     private var incomingDismissJob: Job? = null
@@ -1219,6 +1222,7 @@ class AppViewModel(
         if (s.fixtureId != null) return
         val raw = AppStateCoder.encode(s) ?: return
         prefs.edit().putString("state", raw).apply()
+        runCatching { com.armsone.ourbutton.widget.updateAllWidgets(getApplication()) }
     }
 
     private fun prefixCodePoints(value: String, maximum: Int): String {

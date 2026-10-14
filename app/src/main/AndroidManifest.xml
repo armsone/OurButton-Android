@@ -75,6 +75,14 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".widget.WidgetConfigurationActivity"
+            android:exported="true"
+            android:theme="@style/Theme.OurButton">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -90,6 +98,7 @@
             android:label="@string/parent_widget_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.armsone.ourbutton.action.WIDGET_DING_DONG" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/parent_widget_info" />
         </receiver>
@@ -99,6 +108,7 @@
             android:label="@string/child_widget_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.armsone.ourbutton.action.WIDGET_DING_DONG" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/child_widget_info" />
         </receiver>

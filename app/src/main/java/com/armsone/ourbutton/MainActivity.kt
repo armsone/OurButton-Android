@@ -18,7 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 
 class MainActivity : ComponentActivity() {
-    companion object { const val EXTRA_WIDGET_ACTION = "button_action" }
+    companion object {
+        const val EXTRA_WIDGET_ACTION = "button_action"
+        const val EXTRA_WIDGET_SPACE_ID = "button_widget_space_id"
+    }
     private lateinit var model: AppViewModel
     private lateinit var hardware: AndroidHardwareGateway
     private var pendingWidgetAction: String? = null
@@ -88,9 +91,15 @@ class MainActivity : ComponentActivity() {
     private fun handlePendingWidgetAction() {
         val action = pendingWidgetAction ?: return
         pendingWidgetAction = null
+        val targetSpaceId = intent.getStringExtra(EXTRA_WIDGET_SPACE_ID)
+        if (!targetSpaceId.isNullOrBlank()) {
+            model.switchRoom(targetSpaceId)
+        }
         val state = model.uiState.value
         if (state.phase != com.armsone.ourbutton.state.AppPhase.HOME) {
-            model.showError("먼저 가족 공간에 참여해 주세요.")
+            if (action != "open") {
+                model.showError("먼저 가족 공간에 참여해 주세요.")
+            }
         } else when (action) {
             "quiet" -> model.sendQuietTap()
             "ding" -> model.sendDingDong()

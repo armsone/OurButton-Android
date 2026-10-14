@@ -32,5 +32,6 @@ class SendCooldown(
 
     companion object {
         const val DEFAULT_DURATION_MILLIS = 10_000L
+        val shared = SendCooldown()
     }
 }
